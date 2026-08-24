@@ -56,7 +56,7 @@ supersedes: 20260817-1610-01
 - type: `log` (plain fact) | `reminder` (time component) | `log+reminder` (both).
 - `supersedes`: set only when this item clearly replaces a fact visible in an existing topic file or a recent raw entry.
 - Update `meta/tag-index.json` in the **same operation** as the append (append entry id, bump count) — never as a separate async step.
-- **Promotion**: when a tag's count reaches `WM_PROMOTE_AFTER` (default 2), create `topics/<tag>.md` backfilled from every raw entry carrying that tag.
+- **Promotion**: when a tag's count reaches `WM_PROMOTE_AFTER` (default 2), create `topics/<tag>.md` backfilled from every raw entry carrying that tag. A deduplicated re-send does NOT increment a tag's occurrence count — promotion counts only distinct captures (approved policy, 2026-08-24).
 - **Size trigger**: if the topic file you'd append to exceeds `WM_CONDENSE_SIZE` (default 2500 bytes), rewrite it condensed instead of appending (see **Consolidation**).
 - **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`.
 - `git add -A && git commit -m "capture: <short summary>"` after the write batch.
