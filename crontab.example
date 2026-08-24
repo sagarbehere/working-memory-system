@@ -1,0 +1,4 @@
+# Working-memory reminder check — every 5 minutes.
+# Install: crontab -e, then paste the line below (adjust the path if the
+# package lives elsewhere). Logs land in ~/.hermes/logs/wm-reminders.log.
+*/5 * * * * /home/hermes/working-memory-system/reminder-check.py >> /home/hermes/.hermes/logs/wm-reminders.log 2>&1

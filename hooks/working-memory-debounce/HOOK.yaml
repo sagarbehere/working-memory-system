@@ -1,0 +1,4 @@
+name: working-memory-debounce
+description: "Buffers Telegram text messages per chat and flushes them as one agent turn after a debounce window; persists pending buffers for crash recovery. Part of the working-memory system."
+events:
+  - gateway:startup
