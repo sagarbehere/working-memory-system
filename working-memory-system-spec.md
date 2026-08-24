@@ -816,10 +816,9 @@ A minimal hook on the base adapter's inbound seam (the shared path every
 platform's MessageEvent passes through) does four things, and nothing
 else:
 
-1. **Lane reservation.** If the message starts with a reservation
-   phrase — `reserve this chat` or `reserve this chat for working
-   memory`, or the unreserve phrase `unreserve this chat`
-   (case-insensitive; short and long forms are symmetric) — the hook
+1. **Lane reservation.** If the message starts with exactly one of the
+   two reservation phrases — `reserve for memory` or `release for
+   memory` (case-insensitive; trailing words tolerated) — the hook
    adds/removes the chat (platform + chat_id + thread_id/room, taken
    from the message itself) in `meta/lanes.json`, stamps the skill, and
    passes the message through so the agent replies with a one-line

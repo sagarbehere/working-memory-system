@@ -35,15 +35,14 @@ check(handler._parse_marker("") is None, "empty")
 check(handler._parse_marker(None) is None, "None")
 
 # --- reservations ---
-check(handler._reservation_action("reserve this chat for working memory") == "reserve", "reserve exact")
-check(handler._reservation_action("Reserve this chat for working memory please") == "reserve", "reserve trailing")
-check(handler._reservation_action("reserve this chat") == "reserve", "reserve short form")
-check(handler._reservation_action("reserve this chat please") == "reserve", "reserve short + trailing")
-check(handler._reservation_action("unreserve this chat") == "unreserve", "unreserve")
-check(handler._reservation_action("unreserve this chat now") == "unreserve", "unreserve trailing")
-check(handler._reservation_action("unreserve this chat for working memory") == "unreserve", "unreserve long form")
+check(handler._reservation_action("reserve for memory") == "reserve", "reserve exact")
+check(handler._reservation_action("Reserve for memory please") == "reserve", "reserve trailing")
+check(handler._reservation_action("release for memory") == "release", "release exact")
+check(handler._reservation_action("Release for memory now") == "release", "release trailing")
+check(handler._reservation_action("reserve this chat") is None, "old reserve phrase gone")
+check(handler._reservation_action("unreserve this chat") is None, "old unreserve phrase gone")
+check(handler._reservation_action("reserve this chat for working memory") is None, "old long phrase gone")
 check(handler._reservation_action("reserve a table for two") is None, "non-reservation")
-check(handler._reservation_action("unreserved seats") is None, "unreserve no word boundary")
 check(handler._reservation_action("note printer") is None, "marker not reservation")
 
 # --- lane keys / reservation round-trip ---
