@@ -21,6 +21,12 @@ Core principle: **capture is dumb and instant; organization is the agent's
 job, done after the fact, and is always reversible because the raw log is
 the source of truth.**
 
+**Version status:** Sections 1-17 describe **v1**, the deployed system
+(Telegram-only). Section 18 is a **proposed v2 generalization** — lane
+registry, platform-agnostic capture, delivery resolution, and universal
+capture markers — written for review and not yet implemented. Nothing in
+Section 18 is live until it is reviewed and signed off.
+
 ---
 
 ## 1. Components
@@ -42,6 +48,10 @@ the source of truth.**
    Telegram messages at the right time.
 7. **Retrieval handler** — answers a Telegram question by searching tags
    and topic files, not by the user browsing anything.
+
+*v2 note (Section 18): the capture handler and reminder scheduler become
+platform-agnostic (generic hook + lane registry); components 1-7 otherwise
+keep their roles unchanged.*
 
 ---
 
@@ -83,6 +93,11 @@ inherent to relying on the user to pick the right chat, not a flaw
 fixed by better classification. If this proves to be a recurring
 problem in practice, it's a candidate for the refinement loop (Section
 17).
+
+*v2 note (Section 18): the dedicated chat remains the frictionless path,
+but the boundary generalizes: multiple named lanes (registry) plus an
+explicit capture marker that works from any chat/client. The marker is a
+syntactic rule, not classification — determinism is preserved.*
 
 ---
 
@@ -171,6 +186,12 @@ infrastructure that already runs, not new services), and one skill
 document for the judgment layer Hermes runs each time it's invoked —
 with a documented escalation path back to this spec, the source, and
 the logs for anything the skill document doesn't cover.
+
+*v2 note (Section 18): the hook's patch point moves from the
+TelegramAdapter to the base adapter's inbound seam so every platform's
+messages flow through the same debounce; the reminder script's delivery
+target is resolved from a lane registry at fire time instead of being
+hardcoded. The code-vs-judgment split itself is unchanged.*
 
 ---
 
@@ -301,6 +322,10 @@ no distinct "source" to record.
    buffer has flushed and been processed, especially during the first
    weeks of use (see Section 13) — e.g. "logged 2 items: health/
    vitamin-d (reminder set for Aug 31), printer".
+
+*v2 note (Section 18): the buffer is keyed by lane (platform + chat +
+thread/room from the registry), not by Telegram chat id; everything else
+in this flow is unchanged.*
 
 ---
 
@@ -446,6 +471,12 @@ no new scheduler daemon, no new bot.
   once the agent recognizes the pattern — flag this as a nice-to-have,
   not required for v1.
 
+*v2 note (Section 18): delivery target resolves from the lane registry at
+fire time with failover (primary lane → fallback lane → DM root → home
+channel), so a deleted topic degrades to a fallback delivery instead of
+an endless retry loop. A due reminder is never left pending solely
+because an address went stale.*
+
 ---
 
 ## 10. Cleanup & aging
@@ -581,13 +612,18 @@ quality — make it a toggle, not a hardcoded behavior.
   covering (e.g. periodic git push to a private remote, or a cron job
   archiving `/working-memory/` off-box) before relying on this as the
   only copy of the data.
+- **v2 (Section 18) open items** are listed in Section 18.12 and are not
+  resolved by this section.
 
 ---
 
 ## 15. Non-goals (v1)
 
 - No cross-device file sync (VPS-only storage, accessed via Telegram).
-- No web UI — Telegram is the only interface, for capture and retrieval.
+- No web UI — Telegram is the only interface for capture and retrieval
+  in v1. The proposed v2 (Section 18) explicitly targets other clients
+  (web UI via the api_server adapter, CLI, and any future platform) and
+  is under review.
 - No multi-user support.
 - No semantic/vector search — plain tag and keyword matching is enough
   at this scale.
@@ -645,6 +681,11 @@ token flow, a Telegram client library, or a scheduler daemon — those
 would duplicate infrastructure every target install already has
 running.
 
+*v2 note (Section 18): packaging gains a lanes config file (the
+registry), a generic base-adapter debounce hook replacing the
+Telegram-specific one, and a delivery resolver inside `reminder-check`;
+the "no new client/daemon" rule is unchanged.*
+
 ---
 
 ## 17. Self-improvement / refinement loop
@@ -699,3 +740,215 @@ plugin directory it lives in — either is fine, as long as it's
 tracked), so every accepted refinement is diffable and revertible,
 the same insurance the git recommendation in Section 4 already gives
 the rest of the system.
+
+---
+
+## 18. Generalization: lanes, platform-agnostic capture, delivery resolution (PROPOSED — under review)
+
+**Status: proposal only. Not implemented. v1 (Sections 1-17) remains the
+description of the deployed system until this section is reviewed,
+approved, and phased in (Section 18.11). The refinement loop (Section
+17) governs any further changes to this section once approved.**
+
+### 18.1 Problem statement
+
+v1 couples the system to a single Telegram thread at three seams:
+
+1. **Lane identity** — `WM_TELEGRAM_CHAT_ID` + `WM_TELEGRAM_THREAD_ID`
+   define *the* working-memory chat as a hardcoded transport address.
+2. **Capture** — the debounce hook monkey-patches `TelegramAdapter`
+   specifically; no other platform's messages can enter the buffer.
+3. **Outbound** — `reminder-check` sends via the Bot API into a
+   hardcoded `chat_id` + `message_thread_id`.
+
+Failure modes this creates:
+
+- **Deleting the Telegram topic** kills capture silently (no messages
+  can arrive at a dead thread) and jams the reminder pipeline: the send
+  fails with `topic_deleted` / `thread not found`, the reminder is
+  never marked fired by design (Section 11), and it retries every cron
+  tick forever while the due reminder never reaches the user.
+- **No other client can participate.** A web UI (Open WebUI via the
+  api_server adapter), the CLI, or any future platform can neither
+  capture thoughts nor receive reminders, because capture and delivery
+  are both Telegram-wired.
+
+### 18.2 Principle
+
+Separate **"what is WM"** (a logical lane + the skill) from **"where it
+lives"** (transport addressing). A lane is a named, resolvable entity
+held in a lane registry; every component — capture hook, skill scope
+guard, reminder delivery, consolidation reporting — resolves the lane
+from the registry rather than holding hardcoded ids. The registry is
+the only place transport addresses live.
+
+### 18.3 Lane registry
+
+New config file `~/.hermes/working-memory.yaml` (the existing
+`working-memory.env` variables become a compatibility shim read only
+when the registry is absent):
+
+```yaml
+lanes:
+  - name: telegram-primary      # the DM topic (v1 lane)
+    platform: telegram
+    chat_id: "143386153"
+    thread_id: "87471"
+    role: capture+delivery
+    skill: working-memory
+  - name: web                   # future Open WebUI chat
+    platform: api_server
+    chat_id: "<chat-id>"
+    role: capture+delivery
+fallback_delivery: home_channel   # where outbound goes when every lane fails
+```
+
+- `name` is the lane's identity; ids are expected values (18.5).
+- `role` reserves lanes for capture, delivery, or both.
+- Empty registry = system disabled, same as empty env today.
+- Adding a client = adding a lane line, no code change.
+
+### 18.4 Generic capture hook
+
+Move the debounce patch from `TelegramAdapter` to the base adapter's
+inbound seam — the shared path every platform's `MessageEvent` passes
+through on the way to the agent. The hook then:
+
+- Matches each inbound event against the registry by `(platform,
+  chat_id, thread_id/room)`; a match buffers per lane key, everything
+  else falls through untouched (no-op default).
+- Keeps v1 semantics unchanged: debounce timer, `.` / `/done` flush,
+  `auto_skill` stamping, persistence to `meta/pending-buffer.json`
+  (now keyed by lane key, not raw chat id), crash recovery.
+- Intercepts `/done` on the base command path, not just Telegram's.
+
+Blast-radius control: strict registry gating plus a per-platform
+verification step in Phase 1 (18.11) proving non-lane traffic is
+byte-identical to stock behavior.
+
+### 18.5 Name-based matching and self-healing
+
+The registry stores lane names; ids are what the system expects, not
+what it is. On gateway startup (and on delivery failure), the system
+re-resolves each lane:
+
+- **Telegram topic missing** (probe fails with `topic_deleted` /
+  `thread not found`): search the DM for a topic named after the lane
+  ("Working Memory"); if found, adopt its `thread_id` and update the
+  registry. If none exists, attempt to create one via the Bot API
+  (open item 18.12.2 — whether `createForumTopic` works in private
+  chats needs verification; today the `/topic` flow has the user
+  create topics). If creation is impossible, deliver to the DM root
+  and nudge the user once to recreate the topic.
+- **Other platforms**: resolve by chat/room name where the adapter
+  supports it (api_server rooms, Discord channels by name).
+- Every re-bind is persisted to the registry and logged (Section 11).
+
+Consequence: a deleted topic becomes "recreate the topic, the system
+re-attaches" instead of "edit config by hand and restart the gateway".
+
+### 18.6 Outbound delivery resolver
+
+`reminder-check` reads the registry, not env. At fire time it resolves
+the best current target: primary lane → fallback lane → DM root → home
+channel. On a `topic_deleted`-class failure it re-resolves and retries
+once before falling back. A reminder is marked fired only when a
+delivery actually succeeded (v1 rule, unchanged); the resolver's job is
+to make some delivery succeed instead of retrying the same dead
+address forever.
+
+Optional alternative (not the v2 default, listed for decision): route
+reminder delivery through the gateway's own `send_message` machinery —
+one code path, every platform, existing retry/fallback behavior — at
+the cost of a few tokens per fire; `reminder-check` would then only
+compute the due set and hand it over.
+
+### 18.7 Universal capture escape hatch
+
+WM input stops being only location-defined. Add deterministic
+syntactic rules that work from any client, no lane required:
+
+- **Prefix**: a message starting with `remember:` is captured from any
+  chat or platform (buffered, extracted, filed exactly like a lane
+  message).
+- **Slash commands**: `/wm` (capture), `/wm get <query>` (retrieval),
+  `/wm forget <x>` (command), `/wm done` (flush).
+- The skill's scope guard (SKILL.md) becomes: (message in a registry
+  lane) OR (message matches an escape-hatch marker) → WM input.
+  Retrieval questions are answered from any chat.
+
+This is a syntactic rule, not a classifier — determinism (Section 2's
+core decision) is preserved. The lane remains the frictionless path;
+the marker is the universal path.
+
+### 18.8 Web UI support (Open WebUI via the api_server adapter)
+
+Open WebUI connects to Hermes through the api_server adapter, where
+each web chat is a session with its own chat identifier. Under v2:
+
+- The web chat is a second lane (`platform: api_server`), so capture,
+  debounce, `auto_skill`, confirmations, and reminders flow through the
+  same generic hook — zero Telegram assumptions.
+- Web chats have no threads, so the thread-id fragility (18.1) does
+  not exist there.
+- The exact chat-id format the adapter assigns to Open WebUI sessions
+  is an open item to verify at implementation (18.12.1).
+
+### 18.9 What does not change
+
+Storage layout (Section 4), raw entry format (Section 5), extraction /
+tagging policy (Section 7), promotion/consolidation (Section 8),
+retrieval paths (Section 12), confirmation behavior (Section 13), the
+refinement loop (Section 17), single-user packaging (Section 16), and
+every filing rule in SKILL.md. Only the scope guard (18.7) and the
+transport seams (18.3-18.6) change.
+
+### 18.10 Trade-offs
+
+- **Registry = config to maintain** — offset by self-healing (18.5)
+  reducing manual edits to near zero, and by the env shim keeping v1
+  installs working untouched.
+- **Generic hook = wider blast radius** — mitigated by strict registry
+  gating and a no-op default; verified per platform in Phase 1.
+- **Escape hatch could over-capture** — mitigated by requiring an
+  explicit marker; nothing is captured from free text.
+- **Reminder delivery via gateway = tiny token cost** — only if the
+  optional alternative (18.6) is chosen; the resolver-only default
+  stays free.
+
+### 18.11 Phased rollout
+
+Each phase is gated by review and a real-input test before the next
+starts; v1 keeps working throughout.
+
+1. **Phase 1 — registry + generic hook.** Extract lane matching to the
+   registry; move the debounce patch to the base-adapter seam;
+   Telegram remains the only lane. Success = behavior identical to v1
+   on Telegram, verified no-op elsewhere.
+2. **Phase 2 — resolver + failover.** Outbound resolver with
+   re-resolve/fallback; test the delete-the-topic scenario end-to-end
+   (capture dies, reminders still deliver via fallback, lane
+   re-attaches on recreation).
+3. **Phase 3 — web UI lane.** Add the api_server lane; verify capture,
+   retrieval, and reminder delivery from Open WebUI.
+4. **Phase 4 — escape hatch.** `remember:` prefix + `/wm` commands;
+   unlocks CLI and any client without registry changes.
+
+### 18.12 New open items (added by this section)
+
+1. **api_server chat-id format** — what identifier the adapter assigns
+   to Open WebUI chats (verify at Phase 3 implementation).
+2. **`createForumTopic` in private chats** — whether the Bot API lets
+   the bot create/recreate DM topics, or whether self-healing must
+   fall back to "nudge the user to recreate" (affects 18.5).
+3. **Fallback delivery policy** — exact order and conditions for
+   primary → fallback lane → DM root → home channel; whether
+   fallback-delivered reminders are marked fired or flagged.
+4. **Escape-hatch syntax** — final markers (`remember:` prefix, `/wm`
+   subcommand set); must not collide with existing slash commands.
+5. **Registry schema stability** — how long the env shim lives, and
+   whether the registry file moves into `WM_ROOT` (backed up with the
+   data) or stays in `~/.hermes/` (backed up with Hermes config).
+6. **Confirmation routing** — confirmations ("✅ logged …") go to the
+   originating lane always, or to the primary lane when captured via
+   the escape hatch.
