@@ -28,7 +28,7 @@ fi
 git -C "$WM_ROOT" config user.name "Hermes Working Memory"
 git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
 if [ ! -f "$WM_ROOT/.gitignore" ]; then
-  printf 'meta/pending-buffer.json\nmeta/reminder-check.lock\n*.tmp\n' > "$WM_ROOT/.gitignore"
+  printf 'meta/pending-buffer.json\nmeta/reminder-check.lock\nlogs/\n*.tmp\n' > "$WM_ROOT/.gitignore"
 fi
 git -C "$WM_ROOT" add -A
 if ! git -C "$WM_ROOT" diff --cached --quiet; then

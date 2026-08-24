@@ -64,6 +64,7 @@ def make_stub(tg, recovered=True, chat="111"):
             # For the original (non-WM) batching path fall-through test:
             self._pending_text_batches = {}
             self._pending_text_batch_tasks = {}
+            self._text_batch_delay_seconds = 0.05
 
         def _text_batch_key(self, event):
             return f"key:{event.source.chat_id}"
