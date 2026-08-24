@@ -815,17 +815,18 @@ A minimal hook on the base adapter's inbound seam (the shared path every
 platform's MessageEvent passes through) does four things, and nothing
 else:
 
-1. **Lane reservation.** If the message starts with the reservation
-   phrase (`reserve this chat for working memory`, case-insensitive) or
-   the unreserve phrase (`unreserve this chat`), the hook adds/removes
-   the chat (platform + chat_id + thread_id/room, taken from the message
-   itself) in `meta/lanes.json`, stamps the skill, and passes the message
-   through so the agent replies with a one-line confirmation via the
-   platform-correct send path. (Implementation note: the hook does not
-   send directly — reservation is rare, so one small agent turn is
-   acceptable; a hook-side reply is a future optimization.) Exact-prefix
-   match, so accidental triggers are unlikely; the confirmation makes
-   them visible if they happen.
+1. **Lane reservation.** If the message starts with a reservation
+   phrase — `reserve this chat` or `reserve this chat for working
+   memory`, or the unreserve phrase `unreserve this chat`
+   (case-insensitive; short and long forms are symmetric) — the hook
+   adds/removes the chat (platform + chat_id + thread_id/room, taken
+   from the message itself) in `meta/lanes.json`, stamps the skill, and
+   passes the message through so the agent replies with a one-line
+   confirmation via the platform-correct send path. (Implementation
+   note: the hook does not send directly — reservation is rare, so one
+   small agent turn is acceptable; a hook-side reply is a future
+   optimization.) Exact-prefix match, so accidental triggers are
+   unlikely; the confirmation makes them visible if they happen.
 2. If the message starts with a marker, or its chat is in
    `meta/lanes.json` (marker implied), → set `auto_skill:
    working-memory` (deterministic skill load) and strip the marker if

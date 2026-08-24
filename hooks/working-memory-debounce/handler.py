@@ -86,7 +86,11 @@ LANES_FILE = WM_ROOT / "meta" / "lanes.json"
 # start, followed by whitespace / punctuation / end (word boundary, so
 # "notebook" never matches "note"). Spec Section 18.2.
 MARKERS = ("hey memory", "note")
+# Reservation phrases — long and short forms are accepted, so the pair is
+# symmetric: "reserve this chat" / "unreserve this chat" (both also work
+# with trailing words; case-insensitive).
 RESERVE_PHRASE = "reserve this chat for working memory"
+RESERVE_PHRASE_SHORT = "reserve this chat"
 UNRESERVE_PHRASE = "unreserve this chat"
 
 
@@ -216,7 +220,13 @@ def _reservation_action(text) -> "str | None":
     if not text:
         return None
     low = text.strip().lower()
-    for phrase, action in ((RESERVE_PHRASE, "reserve"), (UNRESERVE_PHRASE, "unreserve")):
+    # Long form first so "reserve this chat for working memory" never
+    # falls through to the short form (substring-safe ordering).
+    for phrase, action in (
+        (RESERVE_PHRASE, "reserve"),
+        (RESERVE_PHRASE_SHORT, "reserve"),
+        (UNRESERVE_PHRASE, "unreserve"),
+    ):
         if low == phrase or low.startswith(phrase + " "):
             return action
     return None

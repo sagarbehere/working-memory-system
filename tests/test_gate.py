@@ -37,8 +37,13 @@ check(handler._parse_marker(None) is None, "None")
 # --- reservations ---
 check(handler._reservation_action("reserve this chat for working memory") == "reserve", "reserve exact")
 check(handler._reservation_action("Reserve this chat for working memory please") == "reserve", "reserve trailing")
+check(handler._reservation_action("reserve this chat") == "reserve", "reserve short form")
+check(handler._reservation_action("reserve this chat please") == "reserve", "reserve short + trailing")
 check(handler._reservation_action("unreserve this chat") == "unreserve", "unreserve")
+check(handler._reservation_action("unreserve this chat now") == "unreserve", "unreserve trailing")
+check(handler._reservation_action("unreserve this chat for working memory") == "unreserve", "unreserve long form")
 check(handler._reservation_action("reserve a table for two") is None, "non-reservation")
+check(handler._reservation_action("unreserved seats") is None, "unreserve no word boundary")
 check(handler._reservation_action("note printer") is None, "marker not reservation")
 
 # --- marker stripping ---

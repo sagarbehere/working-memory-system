@@ -32,7 +32,7 @@ Layout under `$WM_ROOT` (a git repo — commit after every write batch):
 
 ## Every incoming message: route it
 
-0. **Reservation phrases** — if the message is "reserve this chat for working memory" or "unreserve this chat" (the capture-gate hook has already updated `meta/lanes.json`): reply with a one-line confirmation ("✅ Reserved — this chat is now a working-memory lane; no markers needed. Undo with 'unreserve this chat'." or the unreserve equivalent) and file NOTHING. If the phrase arrived but `meta/lanes.json` does not reflect it (edge case), follow spec Section 18.3 and record it yourself, then confirm.
+0. **Reservation phrases** — if the message is "reserve this chat" / "reserve this chat for working memory" or "unreserve this chat" (the capture-gate hook has already updated `meta/lanes.json`): reply with a one-line confirmation ("✅ Reserved — this chat is now a working-memory lane; no markers needed. Undo with 'unreserve this chat'." or the unreserve equivalent) and file NOTHING. If the phrase arrived but `meta/lanes.json` does not reflect it (edge case), follow spec Section 18.3 and record it yourself, then confirm.
 1. Split the text into items — **conservative**: one coherent thought = one item even if it touches multiple tags; split only genuinely unrelated content.
 2. Classify each item: `capture` (remember), `question` (retrieve now), `command` (filing/admin instruction).
 3. Capture → **Capture**. Question → **Retrieve**. Command → **Command**.
