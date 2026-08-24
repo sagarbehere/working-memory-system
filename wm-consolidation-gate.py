@@ -178,8 +178,15 @@ def pending_approvals(root: str) -> int:
         return 0
     try:
         with open(path) as f:
+            # Anchor at line start: real status lines read "STATUS: PENDING
+            # APPROVAL", while the header legend line is "- `STATUS: PENDING
+            # APPROVAL` — ..." and must NOT count. (Bug fixed 2026-08-24:
+            # previous bare substring match counted the legend as a pending
+            # entry, making the gate fire on a false positive every run.)
             return sum(
-                1 for ln in f if "STATUS: PENDING APPROVAL" in ln
+                1
+                for ln in f
+                if ln.lstrip().startswith("STATUS: PENDING APPROVAL")
             )
     except OSError:
         return 0
