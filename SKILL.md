@@ -70,6 +70,7 @@ supersedes: 20260817-1610-01
 
 - **Reminder questions** ("what's due this week", "show my reminders", "any reminders for printer?") → read `reminders.json`, filter `status == pending` (by date range / keyword against `message` if the query narrows), sort soonest-first. Never answer from topic files — a topic line can be terse, stale, or already removed once fired.
 - **Fact questions** → 1) match `tag-index.json` / topic file names (fast path — most queries resolve from a single topic file), 2) search tag-index more broadly, 3) fall back to the current month's raw log, then `raw/archive/`. Answer conversationally; never make the user guess a tag name.
+- **Pending-review checks** — if the user asks "anything pending review?" / "any proposals for me?" (or similar), read `meta/refinement-log.md`, list PENDING REVIEW entries (drafted policy changes / flagged code gaps) with their before/after diffs, and collect the user's decision. Only after approval may drafted policy changes be applied (per the Refinement loop section).
 
 ## Command (run immediately — don't wait for consolidation)
 
