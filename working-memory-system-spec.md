@@ -23,10 +23,11 @@ the source of truth.**
 
 **Version status:** Sections 1-17 describe **v1**, the deployed system
 (Telegram-only). Section 18 is a **proposed v2 generalization** — a
-marker-first design ("Hey memory" / "note") that makes working-memory
-input deterministic on any client without lane registries or thread-id
-dependencies — written for review and not yet implemented. Nothing in
-Section 18 is live until it is reviewed and signed off.
+marker-first design ("Hey memory" / "note") plus in-chat lane
+reservation, making working-memory input deterministic on any client
+without config-managed registries or thread-id dependencies — written
+for review and not yet implemented. Nothing in Section 18 is live until
+it is reviewed and signed off.
 
 ---
 
@@ -96,11 +97,11 @@ problem in practice, it's a candidate for the refinement loop (Section
 17).
 
 *v2 note (Section 18): the dedicated chat remains the frictionless path,
-but the boundary becomes a message marker rather than a chat. A message
-starting with "Hey memory" / "note" is WM input from any chat or
-client; the dedicated chat survives only as an optional convenience where
-the marker is implied. The marker is a syntactic rule, not classification
-— determinism is preserved.*
+but the boundary becomes a message marker rather than a chat. Any chat
+can be reserved in-band ("reserve this chat for working memory") to make
+the marker implied there, and a message starting with "Hey memory" /
+"note" is WM input from any chat or client. The marker is a syntactic
+rule, not classification — determinism is preserved.*
 
 ---
 
@@ -758,15 +759,16 @@ The first v2 draft (superseded) proposed a lane registry to decouple the
 system from a single Telegram thread. On review, a much simpler design
 does the same job: **define working-memory input by a deterministic
 message marker rather than by location.** If every WM interaction starts
-with a fixed phrase, the system needs no registry, no lane bookkeeping,
-and no thread-id dependence at all:
+with a fixed phrase, the system needs no config-managed registry and no
+thread-id dependence; reserved chats (18.5) are optional conveniences
+added in-band, never requirements:
 
 - v1's three Telegram-shaped seams (Section 3's hook, Section 2's
   boundary, Section 9's delivery) collapse to one rule: *"a message that
   starts with the marker is WM input, anywhere."*
 - The failure mode that motivated v2 — deleting a Telegram topic jams
-  capture and reminders — disappears by construction: no lane, no
-  dependency, nothing to break.
+  capture and reminders — disappears by construction: no chat is a
+  dependency; reserved chats degrade to marker mode if deleted.
 - Every client (Telegram, web UI via the api_server adapter, CLI, future
   platforms) works identically with zero per-platform configuration.
 
@@ -810,24 +812,40 @@ groups) without platform-specific command plumbing.
 ### 18.3 Capture gate (replaces the Telegram-only hook)
 
 A minimal hook on the base adapter's inbound seam (the shared path every
-platform's MessageEvent passes through) does three things, and nothing
+platform's MessageEvent passes through) does four things, and nothing
 else:
 
-1. If the message starts with a marker, or its chat is the designated
-   lane (marker implied), → set `auto_skill: working-memory`
-   (deterministic skill load) and strip the marker if one is present.
-2. Buffer marked messages with a **short debounce** (default 5s,
+1. **Lane reservation.** If the message starts with the reservation
+   phrase (`reserve this chat for working memory`, case-insensitive) or
+   the unreserve phrase (`unreserve this chat`), the hook adds/removes
+   the chat (platform + chat_id + thread_id/room, taken from the message
+   itself) in `meta/lanes.json`, replies with a one-line confirmation,
+   and consumes the message — no agent turn, no tokens. Exact-prefix
+   match, so accidental triggers are unlikely; the confirmation makes
+   them visible if they happen.
+2. If the message starts with a marker, or its chat is in
+   `meta/lanes.json` (marker implied), → set `auto_skill:
+   working-memory` (deterministic skill load) and strip the marker if
+   one is present.
+3. Buffer marked messages with a **short debounce** (default 5s,
    tunable `WM_MARKER_DEBOUNCE_SECONDS`) before flushing as one agent
    turn, so a quick follow-up ("note printer arrived" + "ink is low")
-   merges instead of splitting. The lane keeps its existing longer
+   merges instead of splitting. Reserved lanes keep the existing longer
    debounce (default 25s, `WM_DEBOUNCE_SECONDS`) since rapid multi-
-   message thoughts are the lane's normal pattern. Either way, a
-   follow-up correction that lands after the flush reconciles via the
+   message thoughts are their normal pattern. Either way, a follow-up
+   correction that lands after the flush reconciles via the
    `supersedes` mechanism (Section 7/8) at consolidation time.
-3. Everything else falls through untouched (no-op default).
+4. Everything else falls through untouched (no-op default).
 
-Blast-radius control: marker-gated; non-marker traffic is byte-identical
-to stock behavior; verified per platform in Phase 1 (18.9).
+`meta/lanes.json` is a small, git-backed file under `WM_ROOT` (Section
+4) holding the reserved-chat set; it survives gateway restarts and is
+backed up with the data. It is self-populating — entries only ever come
+from explicit in-chat declarations (plus, optionally, v1's env vars as
+a legacy seed, Section 18.5).
+
+Blast-radius control: marker-gated; non-marker traffic in non-reserved
+chats is byte-identical to stock behavior; verified per platform in
+Phase 1 (18.9).
 
 Decision (resolved open item 18.10.4): **the hook is kept.** Deterministic
 skill loading is a core principle (Section 2/3); the hook is small, and
@@ -847,34 +865,41 @@ probabilistic. The no-hook alternative is rejected.
 - Confirmations ("✅ logged …") reply to the chat where the capture
   happened — natural with the short debounce.
 
-### 18.5 Frictionless lane AND marker — both, deliberately
+### 18.5 Reserved lanes AND marker — both, deliberately
 
 Both mechanisms are kept, and they are complementary, not redundant:
 
-- **The lane is the primary capture surface** — the user's most-used
-  client stays zero-friction: thoughts typed or dictated into the WM
-  topic need no marker (it is implied and auto-stamped, exactly like
-  today). Rapid entry is the priority, and the lane is how capture stays
-  instant.
+- **A reserved chat is the primary capture surface** — the user reserves
+  a chat with a one-line in-chat phrase (Section 18.3), and from then on
+  it is zero-friction: thoughts typed or dictated there need no marker.
+  Rapid entry is the priority, and the reserved chat is how capture
+  stays instant. Multiple chats can be reserved (e.g. the Telegram WM
+  topic *and* a web chat), each on any platform, with no per-platform
+  config.
 - **The marker is the universal path** — one message prefix that works
   from every other client (web UI, CLI, any chat), and the resilience
-  net: if the lane's topic is ever deleted, the system degrades to
-  marker mode everywhere and nothing breaks.
+  net: if a reserved chat is ever deleted, the system degrades to
+  marker mode everywhere and nothing breaks; re-reserving the recreated
+  chat is one phrase.
 
-Config cost: **none beyond what v1 already has.** The lane is designated
-by the existing `WM_TELEGRAM_CHAT_ID` / `WM_TELEGRAM_THREAD_ID` env
-variables — no new config file, no registry, no schema. Marker mode
-requires zero config at all. The lane is convenience, not dependency:
-deleting the env vars (or the topic) falls back to marker mode with
+**Config cost: zero.** Lane declaration is in-band (a phrase in the
+chat), not out-of-band config. `meta/lanes.json` is the only new state —
+a self-populating, git-backed list of reserved chats, never edited by
+hand. v1's `WM_TELEGRAM_CHAT_ID` / `WM_TELEGRAM_THREAD_ID` env vars
+remain as a legacy seed (equivalent to one pre-reserved chat) and can be
+dropped once reservations are in use. A reserved chat is convenience,
+not dependency: deleting a reservation falls back to marker mode with
 reminders going to origin/home, no self-healing machinery required for
-correctness; re-binding is editing the env vars again (or, at most, a
-lazy re-adoption by name as a future nice-to-have).
+correctness.
 
 ### 18.6 Web UI and CLI
 
 - Web UI (Open WebUI via the api_server adapter) and CLI work
   identically: start a message with the marker in any chat. No
   api_server-specific chat-id knowledge is needed for capture.
+- To make a web chat a reserved lane (marker-free), open it and send
+  the reservation phrase — the hook learns the chat's address from the
+  message itself, so no chat-id lookup or config edit is needed.
 - Reminder delivery to an api_server chat uses the origin address
   recorded at capture; if the web chat id format ever changes, the
   home-channel fallback covers it.
@@ -900,8 +925,10 @@ delivery (18.4) change.
 - **Hook still exists** — but it is a single small gate (marker match +
   `auto_skill` stamp), far simpler than the registry-driven version;
   kept deliberately for deterministic skill loading (18.10.4).
-- **Optional lane keeps a small config** — one entry, vs. v1's env
-  vars; deleting it breaks nothing.
+- **Reservation is a persistent side effect from a chat message** —
+  mitigated by exact-phrase matching, a confirmation reply, and a
+  one-phrase undo (`unreserve this chat`); nothing breaks if it is
+  never used.
 
 ### 18.9 Phased rollout
 
@@ -915,9 +942,10 @@ throughout.
 2. **Phase 2 — origin delivery.** Add origin to reminder records;
    `reminder-check` delivers to origin with home-channel fallback; test
    the delete-the-topic scenario (reminders still arrive).
-3. **Phase 3 — lane demotion + web UI.** Convert the existing WM topic
-   to the optional implied-marker lane; verify capture still works
-   frictionlessly there, and marker capture works from Open WebUI/CLI.
+3. **Phase 3 — reservation + web UI.** Implement the reserve/unreserve
+   phrases and `meta/lanes.json`; reserve the existing WM topic in-chat
+   and verify capture stays frictionless; reserve an Open WebUI chat and
+   verify capture, retrieval, and reminder delivery from it.
 
 ### 18.10 Open items (added by this section)
 
@@ -933,7 +961,8 @@ throughout.
 5. **Reminder origin schema** — extend the reminder record with origin
    {platform, chat_id, thread_id?}; confirm the home-channel fallback
    value.
-6. **Optional lane config — RESOLVED.** The lane reuses the existing
-   `WM_TELEGRAM_CHAT_ID` / `WM_TELEGRAM_THREAD_ID` env vars (plus the
-   config.yaml `dm_topics` binding); no new config format. Adopt-by-name
-   on recreation remains a future nice-to-have, not required.
+6. **Lane mechanism — RESOLVED.** Lanes are declared in-band via the
+   reservation phrase (Section 18.3/18.5), stored in `meta/lanes.json`;
+   v1's env vars remain as a legacy seed only. Reservation phrases must
+   not collide with normal conversation (exact prefix match plus the
+   confirmation reply covers accidental triggers).
