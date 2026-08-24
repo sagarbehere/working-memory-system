@@ -20,6 +20,9 @@ mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/topics" "$WM_ROOT/meta" "$WM_ROOT/logs
 if [ ! -f "$WM_ROOT/reminders.json" ]; then
   echo "[]" > "$WM_ROOT/reminders.json"
 fi
+if [ ! -f "$WM_ROOT/meta/lanes.json" ]; then
+  echo "{}" > "$WM_ROOT/meta/lanes.json"
+fi
 
 # 2. Backup git repo (spec Section 3) — repo-local identity, no global config
 if [ ! -d "$WM_ROOT/.git" ]; then
@@ -82,14 +85,16 @@ fi
 
 echo
 echo "== Next steps =="
-echo "1) Set WM_TELEGRAM_CHAT_ID in $HERMES_HOME/working-memory.env to your"
-echo "   dedicated working-memory chat (spec Section 2) — see README for how"
-echo "   to create one (DM topic lane or private group). Until then the"
-echo "   system is disabled."
-echo "2) Add the cron line (crontab -e):"
+echo "1) v2 is marker-first (spec Section 18): capture works anywhere with"
+echo "   zero config — start a message with 'Hey memory' or 'note'."
+echo "2) Optional frictionless lane: set WM_TELEGRAM_CHAT_ID (+ THREAD_ID)"
+echo "   in $HERMES_HOME/working-memory.env as a legacy seed, OR reserve a"
+echo "   chat in-band with 'reserve this chat for working memory' (any"
+echo "   platform). Markers are implied in reserved chats."
+echo "3) Add the cron line (crontab -e):"
 sed 's/^/   /' "$PKG_DIR/crontab.example"
-echo "3) Restart the gateway so the hook loads (run from SSH, not from"
+echo "4) Restart the gateway so the hook loads (run from SSH, not from"
 echo "   inside an agent session — it deadlocks there):"
 echo "   hermes gateway restart"
-echo "4) Send /reload-skills in the Telegram chat so the working-memory"
+echo "5) Send /reload-skills in the Telegram chat so the working-memory"
 echo "   skill is visible to the agent."

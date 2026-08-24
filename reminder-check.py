@@ -4,8 +4,11 @@
 Run from the VPS crontab every few minutes (see crontab.example). Reads
 $WM_ROOT/reminders.json, fires every pending reminder whose due_at has
 passed — including any that came due while the VPS was down — sends it via
-the existing Hermes Telegram bot into the dedicated working-memory chat
-(WM_TELEGRAM_CHAT_ID, spec Section 2/9), and marks it fired. A failed
+the existing Hermes Telegram bot into the reminder's origin chat (the
+chat where it was captured — spec Section 18.4), falling back to the
+legacy working-memory lane (WM_TELEGRAM_CHAT_ID / THREAD_ID, spec
+Section 2/9) when the origin is missing or not deliverable by this
+script (non-Telegram origins such as the api_server/web UI). A failed
 send is never marked fired; it stays pending and retries on the next
 tick (spec Section 11). Every fire attempt is logged to
 $WM_ROOT/logs/YYYY-MM.log (JSON lines).
@@ -114,6 +117,25 @@ def _git_commit(wm_root, fired, failed):
         print(f"  git commit failed: {exc}", flush=True)
 
 
+def _resolve_target(reminder, default_chat, default_thread):
+    """Pick the delivery address for a reminder (spec Section 18.4).
+
+    Origin (platform + chat_id + thread_id) is recorded at capture time
+    by the agent. Telegram origins deliver directly; anything else (or a
+    missing origin) falls back to the legacy lane / home channel. Returns
+    (chat_id, thread_id, fell_back: bool).
+    """
+    origin = reminder.get("origin") or {}
+    platform = origin.get("platform") or "telegram"
+    if platform != "telegram":
+        # Non-Telegram origins are not deliverable by this standalone
+        # script yet — home-channel fallback (spec 18.4/18.6).
+        return default_chat, default_thread, True
+    if origin.get("chat_id"):
+        return origin.get("chat_id"), origin.get("thread_id") or default_thread, False
+    return default_chat, default_thread, True
+
+
 def main():
     wm_env = _load_env(HERMES_HOME / "working-memory.env")
     wm_root = pathlib.Path(wm_env.get("WM_ROOT") or str(HOME / "working-memory"))
@@ -151,7 +173,7 @@ def main():
         with reminders_path.open(encoding="utf-8") as fh:
             reminders = json.load(fh)
 
-        fired, failed = [], []
+        fired, failed, fell_back_log = [], [], []
         for r in reminders:
             if r.get("status") != "pending":
                 continue
@@ -170,14 +192,25 @@ def main():
                 f"{(r.get('message') or '')[:80]}",
                 flush=True,
             )
-            ok, info = _send(token, chat_id, thread_id, r.get("message", "Reminder"))
+            t_chat, t_thread, fell_back = _resolve_target(r, chat_id, thread_id)
+            if fell_back:
+                fell_back_log.append(r.get("id"))
+                _log(
+                    wm_root, "reminder-cron", "fire", "origin-fallback",
+                    reminder_id=r.get("id"),
+                    origin=r.get("origin") or "none",
+                )
+            ok, info = _send(token, t_chat, t_thread, r.get("message", "Reminder"))
             if ok:
                 r["status"] = "fired"
                 r["fired_at"] = now.isoformat()
+                if fell_back:
+                    r["delivered_via"] = "fallback"
                 fired.append(r.get("id"))
                 _log(
                     wm_root, "reminder-cron", "fire", "sent",
                     reminder_id=r.get("id"), attempts=info,
+                    origin=r.get("origin") or "legacy-lane",
                 )
             else:
                 failed.append(r.get("id"))
@@ -196,7 +229,7 @@ def main():
         pending = sum(1 for r in reminders if r.get("status") == "pending")
         print(
             f"reminder-check: fired={len(fired)} failed={len(failed)} "
-            f"pending={pending}",
+            f"fallback={len(fell_back_log)} pending={pending}",
             flush=True,
         )
         return 0

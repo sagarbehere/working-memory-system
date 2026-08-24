@@ -8,7 +8,25 @@ everything is reversible.
 
 Full design rationale: [`working-memory-system-spec.md`](working-memory-system-spec.md).
 
-## Scope: a dedicated chat (spec Section 2)
+## v2: markers + reserved lanes (implemented)
+
+Since v1, the system is **marker-first** (spec Section 18):
+
+- **Marker mode (zero config, any platform):** a message starting with
+  `Hey memory` or `note` (case-insensitive, word boundary) is
+  working-memory input — capture, retrieval, or commands — from *any*
+  chat or client (Telegram, web UI via the api_server adapter, CLI).
+  Markers are stripped before processing; a short 5s debounce merges
+  quick follow-ups.
+- **Reserved lanes (frictionless):** say `reserve this chat for working
+  memory` in any chat and it becomes a marker-free lane (recorded in
+  `$WM_ROOT/meta/lanes.json`); `unreserve this chat` undoes it. The v1
+  env-declared chat (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID`) still works as
+  one pre-reserved legacy lane.
+- **Reminders deliver to the chat where they were captured**, with a
+  home-channel fallback (origin recorded per reminder, spec 18.4).
+
+## Scope: a dedicated chat (v1 design, still supported)
 
 Only messages sent to a **dedicated working-memory chat** are captured.
 Every other chat with Hermes is completely unaffected and behaves as

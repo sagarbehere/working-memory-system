@@ -1,0 +1,91 @@
+"""Unit tests for the v2 capture-gate pure logic (no gateway required).
+
+Run: python3 tests/test_gate.py   (from the package dir)
+"""
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+TMP = tempfile.mkdtemp(prefix="wmtest_")
+os.environ["WM_SKIP_PATCH"] = "1"          # don't monkey-patch at import
+os.environ["WM_ROOT"] = TMP                 # never touch real data
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "hooks" / "working-memory-debounce"))
+import handler  # noqa: E402
+
+passed = 0
+
+def check(cond, label):
+    global passed
+    assert cond, f"FAIL: {label}"
+    passed += 1
+
+# --- markers (word-boundary, case-insensitive) ---
+check(handler._parse_marker("note printer arrived") == "note", "note + space")
+check(handler._parse_marker("Note: printer") == "note", "Note: case + colon")
+check(handler._parse_marker("notebook arrived") is None, "notebook no-match")
+check(handler._parse_marker("Hey memory, vitamin D") == "hey memory", "Hey memory + comma")
+check(handler._parse_marker("hey memory") == "hey memory", "exact hey memory")
+check(handler._parse_marker("HEY MEMORY what's due") == "hey memory", "upper case")
+check(handler._parse_marker("notes app") is None, "notes no-match")
+check(handler._parse_marker("note") == "note", "bare note")
+check(handler._parse_marker("") is None, "empty")
+check(handler._parse_marker(None) is None, "None")
+
+# --- reservations ---
+check(handler._reservation_action("reserve this chat for working memory") == "reserve", "reserve exact")
+check(handler._reservation_action("Reserve this chat for working memory please") == "reserve", "reserve trailing")
+check(handler._reservation_action("unreserve this chat") == "unreserve", "unreserve")
+check(handler._reservation_action("reserve a table for two") is None, "non-reservation")
+check(handler._reservation_action("note printer") is None, "marker not reservation")
+
+# --- marker stripping ---
+check(handler._strip_marker("note printer arrived", "note") == "printer arrived", "strip note+space")
+check(handler._strip_marker("note: printer", "note") == "printer", "strip note+colon")
+check(handler._strip_marker("Hey memory, vitamin D", "hey memory") == "vitamin D", "strip hey memory+comma")
+check(handler._strip_marker("hey memory", "hey memory") == "", "strip to empty")
+
+# --- lane keys / reservation round-trip ---
+class FakePlatform:
+    value = "telegram"
+
+class FakeSource:
+    platform = FakePlatform()
+    chat_id = "143386153"
+    thread_id = "87471"
+
+check(handler._lane_key(FakeSource()) == "telegram:143386153:87471", "lane key")
+check(handler._telegram_lane_key("143386153", "87471") == "telegram:143386153:87471", "telegram lane key")
+check(handler._is_reserved(FakeSource()) is True, "env-seed lane reserved")
+
+class FakeSource2:
+    platform = FakePlatform()
+    chat_id = "999"
+    thread_id = "555"
+
+check(handler._is_reserved(FakeSource2()) is False, "fresh chat not reserved")
+handler._record_reservation(FakeSource2(), "reserve")
+check(handler._is_reserved(FakeSource2()) is True, "reserved after phrase")
+
+lanes_file = pathlib.Path(TMP) / "meta" / "lanes.json"
+check(lanes_file.exists(), "lanes.json written")
+data = json.loads(lanes_file.read_text())
+check("telegram:999:555" in data, "lanes.json contains new lane")
+check("telegram:143386153:87471" in data, "lanes.json contains env seed")
+
+reloaded = handler._load_lanes()
+check("telegram:999:555" in reloaded, "reload picks up reservation")
+
+handler._record_reservation(FakeSource2(), "unreserve")
+check(handler._is_reserved(FakeSource2()) is False, "unreserved after phrase")
+reloaded2 = handler._load_lanes()
+check("telegram:999:555" not in reloaded2, "reload drops unreserved lane")
+check("telegram:143386153:87471" in reloaded2, "env seed survives")
+
+# --- debounce knobs ---
+check(handler.WM_MARKER_DEBOUNCE == 5.0, "marker debounce default 5s")
+check(handler.WM_DEBOUNCE == 25.0, "lane debounce default 25s")
+
+print(f"ALL GATE TESTS PASSED ({passed} checks)")

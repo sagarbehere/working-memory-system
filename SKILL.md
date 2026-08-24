@@ -1,6 +1,6 @@
 ---
 name: working-memory
-description: "Use for the working-memory system: when the user sends capture, retrieval-question, or filing-correction messages in the dedicated working-memory Telegram chat, and for the nightly consolidation pass. Implements the working-memory system: split/tag buffered text, file captures to the raw log, promote topics, manage reminders, answer retrieval questions from stored notes."
+description: "Use for the working-memory system: when the user sends capture, retrieval-question, or filing-correction messages in a reserved working-memory chat or starting with the markers 'Hey memory'/'note', and for the nightly consolidation pass. Implements the working-memory system: split/tag buffered text, file captures to the raw log, promote topics, manage reminders, answer retrieval questions from stored notes."
 version: 2.0.0
 author: Sagar Behere
 license: MIT
@@ -14,7 +14,9 @@ metadata:
 
 Personal working-memory system: the user captures thoughts via Telegram in a **dedicated chat** (spec Section 2); you do all filing, retrieval, reminders, and cleanup. Raw log is ground truth; topic files are derived caches; everything is reversible.
 
-**Scope guard:** only messages that arrive in the dedicated working-memory chat (see `WM_TELEGRAM_CHAT_ID` in `~/.hermes/working-memory.env`) are working-memory input. If you're processing a message from any other chat, do NOT file anything — answer as a normal assistant.
+**Scope guard (v2, spec Section 18):** working-memory input is any message that (a) arrives in a **reserved lane** — a chat previously reserved in-band with "reserve this chat for working memory", recorded in `meta/lanes.json`, or the legacy env-declared lane (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID` in `~/.hermes/working-memory.env`) — or (b) starts with a **marker**: `Hey memory` or `note` (case-insensitive, word boundary, stripped before you see it). Everything else is NOT working-memory input — answer as a normal assistant and file nothing.
+
+**Lane identity = chat + thread, not session.** The lane is the topic identified by `WM_TELEGRAM_CHAT_ID` + `WM_TELEGRAM_THREAD_ID` (the "Working Memory" topic inside the bot DM). It is independent of which Hermes session is currently bound to that topic: `/new` (fresh session, same topic) and compression-driven session rotation (old session sealed `compression`, child session continues) do NOT disconnect the lane — the debounce hook and the `dm_topics` skill binding key on chat+thread only, and all durable data lives in `$WM_ROOT` files, not in the conversation context. When explaining WM to the user: "lane" is a working-memory-system term, not Hermes vocabulary (topic = Telegram layer, session = Hermes layer). Full session model: see the `hermes-session-lifecycle` skill.
 
 Read `~/.hermes/working-memory.env` before your first write — it defines `WM_ROOT` (storage root) and the tunable thresholds (`WM_PROMOTE_AFTER`, `WM_CONDENSE_SIZE`, `WM_RAW_RETENTION_DAYS`, `WM_CONFIRM`).
 
@@ -30,6 +32,7 @@ Layout under `$WM_ROOT` (a git repo — commit after every write batch):
 
 ## Every incoming message: route it
 
+0. **Reservation phrases** — if the message is "reserve this chat for working memory" or "unreserve this chat" (the capture-gate hook has already updated `meta/lanes.json`): reply with a one-line confirmation ("✅ Reserved — this chat is now a working-memory lane; no markers needed. Undo with 'unreserve this chat'." or the unreserve equivalent) and file NOTHING. If the phrase arrived but `meta/lanes.json` does not reflect it (edge case), follow spec Section 18.3 and record it yourself, then confirm.
 1. Split the text into items — **conservative**: one coherent thought = one item even if it touches multiple tags; split only genuinely unrelated content.
 2. Classify each item: `capture` (remember), `question` (retrieve now), `command` (filing/admin instruction).
 3. Capture → **Capture**. Question → **Retrieve**. Command → **Command**.
@@ -58,7 +61,7 @@ supersedes: 20260817-1610-01
 - Update `meta/tag-index.json` in the **same operation** as the append (append entry id, bump count) — never as a separate async step.
 - **Promotion**: when a tag's count reaches `WM_PROMOTE_AFTER` (default 2), create `topics/<tag>.md` backfilled from every raw entry carrying that tag. A deduplicated re-send does NOT increment a tag's occurrence count — promotion counts only distinct captures (approved policy, 2026-08-24).
 - **Size trigger**: if the topic file you'd append to exceeds `WM_CONDENSE_SIZE` (default 2500 bytes), rewrite it condensed instead of appending (see **Consolidation**).
-- **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`.
+- **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). **`origin`** (optional, spec Section 18.4) = `{"platform": "<source platform>", "chat_id": "<chat>", "thread_id": "<thread or ''>"}` — record it when the capture came from a non-lane chat (e.g. a marker message from the web UI or another Telegram topic) so the reminder delivers back to the chat where it was captured; omit for reserved-lane captures (the legacy lane is the default target). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`, delivering to origin with a home-channel fallback.
 - `git add -A && git commit -m "capture: <short summary>"` after the write batch.
 - **Confirm** with ONE short line (skip entirely when `WM_CONFIRM=0`). Never
   include ids, tags, file paths, commit hashes, or internal operational
@@ -135,8 +138,11 @@ Review the log on each consolidation pass (weekly-ish). **Approval boundary:**
 ## Escalation
 
 If a request doesn't clearly fit the rules above, consult before improvising:
-- **Why** the system works this way → the full spec at `/home/hermes/working-memory-system/working-memory-system-spec.md` (e.g. why `command` items never become raw entries, why reminders have their own retrieval path, why the dedicated chat scopes everything).
+- **Why** the system works this way → the full spec at `/home/hermes/working-memory-system/working-memory-system-spec.md` (e.g. why `command` items never become raw entries, why reminders have their own retrieval path, why markers + reserved lanes scope working-memory input — Section 18).
+- **v2 is IMPLEMENTED** (spec Section 18) → markers "Hey memory"/"note", in-chat reservation ("reserve this chat for working memory" → `meta/lanes.json`), origin-based reminder delivery. Honor them in live capture. Do NOT re-propose the rejected lane-registry design.
 - **How** it currently works → the implementation source in that package (the debounce hook `hooks/working-memory-debounce/handler.py`, `reminder-check.py`).
 - **What actually happened** on a past run → `$WM_ROOT/logs/YYYY-MM.log` (e.g. "why didn't my reminder fire yesterday" needs logs, not the spec or code — neither records runtime history).
+
+**Keeping the system updated:** when asked anything about how the working-memory system works (including odd or hypothetical questions), consult the spec, this skill, and the source BEFORE answering from memory. When you notice a gap, a repeated correction, or a case the rules don't fit, append a dated entry to `meta/refinement-log.md` (Refinement loop section above) — never rewrite it. Policy changes to SKILL.md always need the user's sign-off; changes to the deterministic code are flagged for the user, never self-made.
 
 SKILL.md is version-controlled in the package repo (`/home/hermes/working-memory-system`, git) — every accepted refinement is diffable and revertible.

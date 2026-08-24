@@ -1,4 +1,4 @@
 name: working-memory-debounce
-description: "Buffers Telegram text messages per chat and flushes them as one agent turn after a debounce window; persists pending buffers for crash recovery. Part of the working-memory system."
+description: "Working-memory capture gate: buffers messages from reserved lanes or with the markers 'Hey memory'/'note' and flushes them as one agent turn; handles in-chat lane reservation; persists pending buffers for crash recovery. Part of the working-memory system (v2, spec Section 18)."
 events:
   - gateway:startup

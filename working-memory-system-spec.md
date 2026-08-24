@@ -819,8 +819,11 @@ else:
    phrase (`reserve this chat for working memory`, case-insensitive) or
    the unreserve phrase (`unreserve this chat`), the hook adds/removes
    the chat (platform + chat_id + thread_id/room, taken from the message
-   itself) in `meta/lanes.json`, replies with a one-line confirmation,
-   and consumes the message — no agent turn, no tokens. Exact-prefix
+   itself) in `meta/lanes.json`, stamps the skill, and passes the message
+   through so the agent replies with a one-line confirmation via the
+   platform-correct send path. (Implementation note: the hook does not
+   send directly — reservation is rare, so one small agent turn is
+   acceptable; a hook-side reply is a future optimization.) Exact-prefix
    match, so accidental triggers are unlikely; the confirmation makes
    them visible if they happen.
 2. If the message starts with a marker, or its chat is in

@@ -1,38 +1,42 @@
-"""Working-memory debounce hook for the Hermes Telegram adapter.
+"""Working-memory v2 capture gate hook (markers + reserved lanes).
 
 Installed at ~/.hermes/hooks/working-memory-debounce/ and loaded by the
 gateway's HookRegistry at startup (gateway/run.py -> gateway/hooks.py).
 
-At import time this module monkey-patches two methods on TelegramAdapter:
+v2 (spec Section 18): the gate lives on the BASE adapter's inbound seam
+(``BaseAdapter.handle_message``), so it sees messages from every platform
+(Telegram, api_server / Open WebUI, etc.), not just Telegram. Three
+inputs qualify as working-memory input:
 
-  _enqueue_text_event
-      Only for the DEDICATED working-memory chat(s) configured via
-      WM_TELEGRAM_CHAT_ID in ~/.hermes/working-memory.env (spec
-      Section 2 — optional WM_TELEGRAM_THREAD_ID narrows to a DM-topic
-      lane). In those chats it replaces the adapter's short client-split
-      batching with the working-memory debounce: each text message is
-      appended to a per-chat buffer, persisted to
-      $WM_ROOT/meta/pending-buffer.json, and the whole buffer is flushed
-      as a SINGLE agent turn once WM_DEBOUNCE_SECONDS of silence elapses.
-      A lone "." flushes immediately and is consumed (never buffered).
-      Every other chat falls through to the original batching untouched
-      and behaves exactly as before. Empty WM_TELEGRAM_CHAT_ID = WM
-      disabled everywhere.
+  1. Reservation / unreservation phrases ("reserve this chat for working
+     memory" / "unreserve this chat") — recorded in ``meta/lanes.json``
+     and passed through to the agent (skill auto-loaded) so the
+     confirmation reply goes out through the platform-correct send path.
+  2. A reserved lane — a chat previously reserved in-band (or the legacy
+     env-var lane) where the marker is implied.
+  3. A marker — a message starting with ``Hey memory`` or ``note``
+     (case-insensitive, word-boundary; spec Section 18.2).
 
-  _handle_command
-      "/done" flushes the chat's buffer immediately and is consumed,
-      avoiding the gateway's "Unknown command" reply. All other commands
-      fall through to the original handler.
+Markers and lane messages are buffered with a debounce before being
+flushed as ONE agent turn (markers: short 5s; reserved lanes: 25s, the
+v1 default), stamped with ``auto_skill`` so the working-memory skill
+loads deterministically, and the marker token is stripped before
+extraction.
 
-The flush dispatches through the adapter's normal handle_message() path,
-so the combined text reaches the agent as one ordinary user message; the
-working-memory SKILL.md guides extraction/tagging/filing/answering.
+Everything else falls through to the original handler untouched
+(no-op default) — the gate costs one string prefix check + one
+in-memory set lookup per message (spec Section 18.8).
 
 Crash recovery (spec Section 10): every buffered chunk is persisted to
-pending-buffer.json. On the next gateway start the buffers are reloaded
-lazily on the first message for a chat and re-armed, so a thought is
-never dropped — worst case it waits for the next message (or a "." or
-"/done") before flushing.
+``meta/pending-buffer.json``; buffers are re-armed lazily on the next
+gateway start, keyed by lane (rebuilt from the stored source), so a
+thought is never dropped.
+
+Lane persistence (spec Section 18.3/18.5): ``meta/lanes.json`` is a
+small, git-backed dict of reserved lanes (lane key -> record). It is
+self-populating — entries only ever come from explicit in-chat
+reservation phrases, plus the legacy env-var seed below. Never edited by
+hand.
 """
 
 import asyncio
@@ -62,43 +66,32 @@ def _load_env_file(path):
 
 
 WM_ENV = _load_env_file(HERMES_HOME / "working-memory.env")
+# Allow WM_ROOT override via env (used by tests; otherwise runtime env file).
 WM_ROOT = pathlib.Path(
-    WM_ENV.get("WM_ROOT") or str(pathlib.Path.home() / "working-memory")
+    os.environ.get("WM_ROOT") or WM_ENV.get("WM_ROOT") or str(pathlib.Path.home() / "working-memory")
 )
 try:
-    WM_DEBOUNCE = float(WM_ENV.get("WM_DEBOUNCE_SECONDS", "25"))
+    WM_DEBOUNCE = float(os.environ.get("WM_DEBOUNCE_SECONDS") or WM_ENV.get("WM_DEBOUNCE_SECONDS", "25"))
 except ValueError:
     WM_DEBOUNCE = 25.0
-# Dedicated working-memory chat(s) ONLY (spec Section 2). Messages in any
-# other chat fall through to normal Hermes behavior. Empty = WM disabled.
-WM_CHAT_IDS = {
-    c.strip()
-    for c in WM_ENV.get("WM_TELEGRAM_CHAT_ID", "").split(",")
-    if c.strip()
-}
-# Optional thread scoping for DM-topic lanes (same chat_id, distinct
-# message_thread_id). Empty = any thread in the WM chat is watched.
-WM_THREAD_IDS = {
-    c.strip()
-    for c in WM_ENV.get("WM_TELEGRAM_THREAD_ID", "").split(",")
-    if c.strip()
-}
-# Skill auto-loaded into the WM lane's session (spec Section 2: the
-# dedicated chat is what makes a message working-memory input; this makes
-# the agent deterministically follow the policy instead of hoping it
-# self-loads the skill). Set on the event so the gateway injects it on
-# new sessions (run.py auto_skill handling).
-WM_SKILL = WM_ENV.get("WM_SKILL", "working-memory").strip() or "working-memory"
+try:
+    WM_MARKER_DEBOUNCE = float(os.environ.get("WM_MARKER_DEBOUNCE_SECONDS") or WM_ENV.get("WM_MARKER_DEBOUNCE_SECONDS", "5"))
+except ValueError:
+    WM_MARKER_DEBOUNCE = 5.0
+WM_SKILL = (os.environ.get("WM_SKILL") or WM_ENV.get("WM_SKILL", "working-memory")).strip() or "working-memory"
 PENDING_FILE = WM_ROOT / "meta" / "pending-buffer.json"
+LANES_FILE = WM_ROOT / "meta" / "lanes.json"
+
+# Markers — primary + short alias. Matched case-insensitively at message
+# start, followed by whitespace / punctuation / end (word boundary, so
+# "notebook" never matches "note"). Spec Section 18.2.
+MARKERS = ("hey memory", "note")
+RESERVE_PHRASE = "reserve this chat for working memory"
+UNRESERVE_PHRASE = "unreserve this chat"
 
 
 def _log(component, event, outcome, **extra) -> None:
-    """Append one JSON line to logs/YYYY-MM.log (spec Section 11).
-
-    This is the diagnostic trail that makes "why didn't X happen"
-    answerable after the fact. Never raises — logging must not break
-    the message pipeline.
-    """
+    """Append one JSON line to logs/YYYY-MM.log (spec Section 11)."""
     try:
         log_dir = WM_ROOT / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -116,23 +109,126 @@ def _log(component, event, outcome, **extra) -> None:
         print(f"[hooks] WM log failed: {exc}", flush=True)
 
 
-def _wm_enabled(source) -> bool:
-    """True only in the dedicated working-memory chat (spec Section 2).
+# ---------------------------------------------------------------- lanes
 
-    Empty WM_TELEGRAM_CHAT_ID = working-memory disabled entirely. All
-    other chats are completely unaffected and behave as normal.
-    """
-    if not WM_CHAT_IDS:
-        return False
+def _lane_key(source) -> str:
+    """Deterministic lane key from a message source: platform:chat:thread."""
+    plat = getattr(source, "platform", "") or ""
+    if hasattr(plat, "value"):
+        plat = plat.value
     cid = str(getattr(source, "chat_id", "") or "")
-    if cid not in WM_CHAT_IDS:
-        return False
-    if WM_THREAD_IDS:
-        tid = str(getattr(source, "thread_id", "") or "")
-        if tid not in WM_THREAD_IDS:
-            return False
-    return True
+    tid = str(getattr(source, "thread_id", "") or "")
+    return f"{plat}:{cid}:{tid}"
 
+
+def _telegram_lane_key(chat_id, thread_id) -> str:
+    return f"telegram:{chat_id}:{thread_id or ''}"
+
+
+def _load_lanes() -> dict:
+    """lane key -> record, from lanes.json plus the legacy env-var seed.
+
+    The env-var lane (WM_TELEGRAM_CHAT_ID / WM_TELEGRAM_THREAD_ID) is
+    treated as one pre-reserved lane so v1 setups keep working unchanged
+    (spec Section 18.5 — legacy seed, droppable once reservations are in
+    use).
+    """
+    lanes = {}
+    try:
+        data = json.loads(LANES_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            lanes.update(data)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    legacy_thread = (WM_ENV.get("WM_TELEGRAM_THREAD_ID") or "").strip()
+    for cid in (
+        c.strip()
+        for c in WM_ENV.get("WM_TELEGRAM_CHAT_ID", "").split(",")
+        if c.strip()
+    ):
+        key = _telegram_lane_key(cid, legacy_thread)
+        lanes.setdefault(
+            key,
+            {
+                "platform": "telegram",
+                "chat_id": cid,
+                "thread_id": legacy_thread,
+                "reserved_at": "env-seed",
+            },
+        )
+    return lanes
+
+
+LANES = _load_lanes()
+
+
+def _persist_lanes() -> None:
+    """Atomic write of the reserved-lane set (git-backed under WM_ROOT)."""
+    try:
+        LANES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = LANES_FILE.with_name(LANES_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(LANES, indent=2), encoding="utf-8")
+        tmp.replace(LANES_FILE)
+    except Exception as exc:
+        print(f"[hooks] WM lanes persist failed: {exc}", flush=True)
+
+
+def _is_reserved(source) -> bool:
+    return _lane_key(source) in LANES
+
+
+def _record_reservation(source, action: str) -> None:
+    key = _lane_key(source)
+    if action == "reserve":
+        LANES[key] = {
+            "platform": str(getattr(source, "platform", "") or ""),
+            "chat_id": str(getattr(source, "chat_id", "") or ""),
+            "thread_id": str(getattr(source, "thread_id", "") or ""),
+            "reserved_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    else:
+        LANES.pop(key, None)
+    _persist_lanes()
+
+
+# --------------------------------------------------------------- marker
+
+def _parse_marker(text) -> "str | None":
+    """Return the matched marker token, or None.
+
+    Word-boundary rule: the marker must be followed by whitespace,
+    punctuation, or end-of-message (spec Section 18.2).
+    """
+    if not text:
+        return None
+    low = text.lower()
+    for m in MARKERS:
+        if low.startswith(m):
+            nxt = low[len(m):len(m) + 1]
+            if not nxt or not nxt.isalnum():
+                return m
+    return None
+
+
+def _reservation_action(text) -> "str | None":
+    """Return 'reserve' / 'unreserve' when the message is a reservation
+    phrase (exact or with trailing words), else None."""
+    if not text:
+        return None
+    low = text.strip().lower()
+    for phrase, action in ((RESERVE_PHRASE, "reserve"), (UNRESERVE_PHRASE, "unreserve")):
+        if low == phrase or low.startswith(phrase + " "):
+            return action
+    return None
+
+
+def _strip_marker(text, marker) -> str:
+    """Strip the marker token plus following whitespace/punctuation."""
+    rest = text[len(marker):].lstrip(" \t:,.;!?-")
+    return rest.strip()
+
+
+# -------------------------------------------------------------- buffer
 
 def _persist(adapter) -> None:
     """Write all in-memory WM buffers to pending-buffer.json (atomic)."""
@@ -169,9 +265,10 @@ def _recover(adapter) -> None:
         if key in getattr(adapter, "_wm_buffers", {}):
             continue
         try:
+            src = SessionSource.from_dict(blob.get("source", {}))
             event = MessageEvent(
                 text=blob.get("text", ""),
-                source=SessionSource.from_dict(blob.get("source", {})),
+                source=src,
                 message_id=blob.get("message_id"),
                 media_urls=list(blob.get("media_urls", [])),
                 media_types=list(blob.get("media_types", [])),
@@ -179,34 +276,33 @@ def _recover(adapter) -> None:
         except Exception as exc:
             print(f"[hooks] WM recover skip {key}: {exc}", flush=True)
             continue
-        adapter._wm_buffers[key] = event
+        # Re-key by the current lane scheme (v1 keys were Telegram batch keys).
+        new_key = _lane_key(src)
+        adapter._wm_buffers[new_key] = event
         event.auto_skill = WM_SKILL  # guarantee the skill is injected on the new session
-        adapter._wm_tasks[key] = asyncio.create_task(_wm_flush(adapter, key))
-        print(f"[hooks] WM recovered pending buffer {key}", flush=True)
-        _log("debounce-hook", "buffer-recovered", "ok", key=key, chars=len(event.text or ""))
+        adapter._wm_tasks[new_key] = asyncio.create_task(_wm_flush(adapter, new_key))
+        print(f"[hooks] WM recovered pending buffer {new_key}", flush=True)
+        _log("capture-gate", "buffer-recovered", "ok", key=new_key, chars=len(event.text or ""))
 
 
-async def _wm_flush(adapter, key: str) -> None:
+async def _wm_flush(adapter, key: str, debounce: "float | None" = None) -> None:
     """Debounce-timer body: dispatch the buffered event as one agent turn."""
+    debounce = WM_DEBOUNCE if debounce is None else debounce
     task = asyncio.current_task()
     try:
-        await asyncio.sleep(WM_DEBOUNCE)
+        await asyncio.sleep(debounce)
         event = adapter._wm_buffers.pop(key, None)
         _persist(adapter)
         if event is None or not (event.text or event.media_urls):
             return
-        print(
-            f"[hooks] WM flush {key}: {len(event.text or '')} chars", flush=True
-        )
-        _log("debounce-hook", "buffer-flushed", "dispatched", key=key, chars=len(event.text or ""))
-        await adapter.handle_message(event)
+        print(f"[hooks] WM flush {key}: {len(event.text or '')} chars", flush=True)
+        _log("capture-gate", "buffer-flushed", "dispatched", key=key, chars=len(event.text or ""))
+        await orig_handle_message(adapter, event)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        # Match stock batching semantics: log loudly, don't re-dispatch
-        # (a re-dispatch after a partial success could duplicate entries).
         print(f"[hooks] WM flush error {key}: {exc}", flush=True)
-        _log("debounce-hook", "buffer-flushed", "error", key=key, error=str(exc))
+        _log("capture-gate", "buffer-flushed", "error", key=key, error=str(exc))
     finally:
         if adapter._wm_tasks.get(key) is task:
             adapter._wm_tasks.pop(key, None)
@@ -214,18 +310,24 @@ async def _wm_flush(adapter, key: str) -> None:
 
 async def _dispatch_now(adapter, event) -> None:
     try:
-        await adapter.handle_message(event)
+        await orig_handle_message(adapter, event)
     except Exception as exc:
         print(f"[hooks] WM dispatch error: {exc}", flush=True)
 
 
-def install_patches() -> None:
-    """Monkey-patch the Telegram adapter (called once at import)."""
-    from gateway.platforms import telegram as tg
-    from gateway.platforms.base import MessageType
+# ---------------------------------------------------------------- patch
 
-    orig_enqueue = tg.TelegramAdapter._enqueue_text_event
-    orig_command = tg.TelegramAdapter._handle_command
+def install_patches() -> None:
+    """Monkey-patch the shared inbound seam (called once at import).
+
+    Patches BaseAdapter.handle_message (every platform's messages pass
+    through it — the one seam that exists for all adapters) and keeps the
+    Telegram /done interception.
+    """
+    global orig_handle_message
+    from gateway.platforms.base import BaseAdapter
+
+    orig_handle_message = BaseAdapter.handle_message
 
     def _ensure_state(self) -> None:
         if not hasattr(self, "_wm_buffers"):
@@ -236,28 +338,47 @@ def install_patches() -> None:
             self._wm_recovered = True
             _recover(self)
 
-    def wm_enqueue(self, event):
-        """Wrapper for TelegramAdapter._enqueue_text_event."""
+    async def wm_handle_message(self, event) -> None:
+        """Wrapper for BaseAdapter.handle_message — the shared gate."""
         _ensure_state(self)
-        if not _wm_enabled(event.source):
-            return orig_enqueue(self, event)
-
         text = (event.text or "").strip()
+
+        # 1. Reservation / unreservation — record, then pass through so
+        #    the agent replies with the confirmation via the normal,
+        #    platform-correct send path (spec 18.3; hook-side reply is a
+        #    future optimization).
+        action = _reservation_action(text)
+        if action:
+            _record_reservation(event.source, action)
+            event.auto_skill = WM_SKILL
+            _log("capture-gate", "reservation", action, key=_lane_key(event.source))
+            print(f"[hooks] WM reservation {action}: {_lane_key(event.source)}", flush=True)
+            return await orig_handle_message(self, event)
+
+        # 2/3. Marker or reserved lane → working-memory input.
+        marker = _parse_marker(text)
+        if not (_is_reserved(event.source) or marker):
+            return await orig_handle_message(self, event)
+
+        key = _lane_key(event.source)
+
+        # Manual flush: a lone "." consumes the buffer (reserved lanes and
+        # marker sessions alike).
         if text == ".":
-            # Manual flush: consume the "." and dispatch what's buffered.
-            key = self._text_batch_key(event)
             buffered = self._wm_buffers.pop(key, None)
             prior = self._wm_tasks.pop(key, None)
             if prior and not prior.done():
                 prior.cancel()
             _persist(self)
             if buffered is not None:
-                _log("debounce-hook", "manual-flush", "dispatched", trigger=".", key=key)
+                _log("capture-gate", "manual-flush", "dispatched", trigger=".", key=key)
                 asyncio.create_task(_dispatch_now(self, buffered))
             return
 
-        key = self._text_batch_key(event)
+        if marker:
+            event.text = _strip_marker(event.text, marker)
         event.auto_skill = WM_SKILL  # deterministic skill injection on new sessions
+
         existing = self._wm_buffers.get(key)
         if existing is None:
             self._wm_buffers[key] = event
@@ -271,71 +392,84 @@ def install_patches() -> None:
                 existing.media_types.extend(event.media_types)
         _persist(self)
 
+        debounce = WM_MARKER_DEBOUNCE if marker else WM_DEBOUNCE
         prior = self._wm_tasks.get(key)
         if prior and not prior.done():
             prior.cancel()
-        self._wm_tasks[key] = asyncio.create_task(_wm_flush(self, key))
+        self._wm_tasks[key] = asyncio.create_task(_wm_flush(self, key, debounce))
         print(
             f"[hooks] WM buffered {key} "
-            f"({len(self._wm_buffers[key].text or '')} chars)",
+            f"({len(self._wm_buffers[key].text or '')} chars, debounce={debounce}s)",
             flush=True,
         )
 
-    async def wm_command(self, update, context):
-        """Wrapper for TelegramAdapter._handle_command — intercepts /done."""
-        try:
-            msg = self._effective_update_message(update)
-        except Exception:
-            msg = None
-        if msg is not None and getattr(msg, "text", None):
-            raw = msg.text.strip()
-            cmd = raw.split()[0].split("@")[0].lower() if raw else ""
-            if cmd == "/done":
-                chat_id = str(getattr(getattr(msg, "chat", None), "id", "") or "")
-                thread_id = str(getattr(msg, "message_thread_id", "") or "")
-                if not WM_CHAT_IDS or chat_id not in WM_CHAT_IDS:
-                    return await orig_command(self, update, context)
-                if WM_THREAD_IDS and thread_id not in WM_THREAD_IDS:
-                    return await orig_command(self, update, context)
-                if not self._should_process_message(msg, is_command=True):
-                    return
-                _ensure_state(self)
-                event = self._build_message_event(
-                    msg, MessageType.COMMAND, update_id=update.update_id
-                )
-                key = self._text_batch_key(event)
-                buffered = self._wm_buffers.pop(key, None)
-                prior = self._wm_tasks.pop(key, None)
-                if prior and not prior.done():
-                    prior.cancel()
-                _persist(self)
-                if buffered is not None:
-                    _log("debounce-hook", "manual-flush", "dispatched", trigger="/done", key=key)
-                    await self.handle_message(buffered)
-                else:
-                    _log("debounce-hook", "manual-flush", "empty", trigger="/done", key=key)
-                    try:
-                        await context.bot.send_message(
-                            chat_id=msg.chat.id, text="Nothing buffered."
-                        )
-                    except Exception:
-                        pass
-                return  # consumed — never reaches the "Unknown command" path
-        return await orig_command(self, update, context)
+    BaseAdapter.handle_message = wm_handle_message
 
-    tg.TelegramAdapter._enqueue_text_event = wm_enqueue
-    tg.TelegramAdapter._handle_command = wm_command
-    if not WM_CHAT_IDS:
+    # /done — Telegram command interception for the manual flush.
+    # (Base has no _handle_command; other platforms rely on "." or the
+    # debounce itself.)
+    try:
+        from gateway.platforms import telegram as tg
+        from gateway.platforms.base import MessageType
+
+        orig_command = tg.TelegramAdapter._handle_command
+
+        async def wm_command(self, update, context):
+            try:
+                msg = self._effective_update_message(update)
+            except Exception:
+                msg = None
+            if msg is not None and getattr(msg, "text", None):
+                raw = msg.text.strip()
+                cmd = raw.split()[0].split("@")[0].lower() if raw else ""
+                if cmd == "/done":
+                    chat_id = str(getattr(getattr(msg, "chat", None), "id", "") or "")
+                    thread_id = str(getattr(msg, "message_thread_id", "") or "")
+                    if _telegram_lane_key(chat_id, thread_id) not in LANES:
+                        return await orig_command(self, update, context)
+                    if not self._should_process_message(msg, is_command=True):
+                        return
+                    _ensure_state(self)
+                    event = self._build_message_event(
+                        msg, MessageType.COMMAND, update_id=update.update_id
+                    )
+                    key = _lane_key(event.source)
+                    buffered = self._wm_buffers.pop(key, None)
+                    prior = self._wm_tasks.pop(key, None)
+                    if prior and not prior.done():
+                        prior.cancel()
+                    _persist(self)
+                    if buffered is not None:
+                        _log("capture-gate", "manual-flush", "dispatched", trigger="/done", key=key)
+                        await orig_handle_message(self, buffered)
+                    else:
+                        _log("capture-gate", "manual-flush", "empty", trigger="/done", key=key)
+                        try:
+                            await context.bot.send_message(
+                                chat_id=msg.chat.id, text="Nothing buffered."
+                            )
+                        except Exception:
+                            pass
+                    return  # consumed — never reaches the "Unknown command" path
+            return await orig_command(self, update, context)
+
+        tg.TelegramAdapter._handle_command = wm_command
+    except Exception as exc:
+        print(f"[hooks] {HOOK_NAME}: /done interception unavailable: {exc}", flush=True)
+
+    if not LANES:
         print(
-            f"[hooks] {HOOK_NAME}: loaded but DISABLED "
-            "(WM_TELEGRAM_CHAT_ID not set — set it to your dedicated "
-            "working-memory chat to activate; spec Section 2)",
+            f"[hooks] {HOOK_NAME}: loaded but no lanes reserved — marker mode "
+            f"only ({WM_SKILL}); reserve a chat with "
+            f"'{RESERVE_PHRASE}' (spec Section 18)",
             flush=True,
         )
     else:
         print(
-            f"[hooks] {HOOK_NAME}: patched TelegramAdapter "
-            f"(debounce={WM_DEBOUNCE}s, root={WM_ROOT}, chats={sorted(WM_CHAT_IDS)})",
+            f"[hooks] {HOOK_NAME}: patched BaseAdapter.handle_message "
+            f"(markers={MARKERS}, lanes={len(LANES)}, "
+            f"lane_debounce={WM_DEBOUNCE}s, marker_debounce={WM_MARKER_DEBOUNCE}s, "
+            f"root={WM_ROOT})",
             flush=True,
         )
 
@@ -343,15 +477,13 @@ def install_patches() -> None:
 async def handle(event_type: str, context: dict) -> None:
     """Hook entry point (gateway:startup)."""
     if event_type == "gateway:startup":
-        status = "disabled" if not WM_CHAT_IDS else f"watching {sorted(WM_CHAT_IDS)}"
-        _log("debounce-hook", "startup", "loaded", status=status, debounce=WM_DEBOUNCE)
+        status = f"{len(LANES)} lanes, markers={MARKERS}" if LANES else f"marker-mode only ({MARKERS})"
+        _log("capture-gate", "startup", "loaded", status=status, lanes=len(LANES))
         print(
-            f"[hooks] {HOOK_NAME}: loaded ({status}, debounce={WM_DEBOUNCE}s, "
-            f"root={WM_ROOT})",
+            f"[hooks] {HOOK_NAME}: loaded ({status}, root={WM_ROOT})",
             flush=True,
         )
 
 
-if not globals().get("_WM_PATCHED"):
-    _WM_PATCHED = True
+if os.environ.get("WM_SKIP_PATCH") != "1":
     install_patches()
