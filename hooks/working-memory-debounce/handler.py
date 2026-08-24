@@ -83,6 +83,12 @@ WM_THREAD_IDS = {
     for c in WM_ENV.get("WM_TELEGRAM_THREAD_ID", "").split(",")
     if c.strip()
 }
+# Skill auto-loaded into the WM lane's session (spec Section 2: the
+# dedicated chat is what makes a message working-memory input; this makes
+# the agent deterministically follow the policy instead of hoping it
+# self-loads the skill). Set on the event so the gateway injects it on
+# new sessions (run.py auto_skill handling).
+WM_SKILL = WM_ENV.get("WM_SKILL", "working-memory").strip() or "working-memory"
 PENDING_FILE = WM_ROOT / "meta" / "pending-buffer.json"
 
 
@@ -174,6 +180,7 @@ def _recover(adapter) -> None:
             print(f"[hooks] WM recover skip {key}: {exc}", flush=True)
             continue
         adapter._wm_buffers[key] = event
+        event.auto_skill = WM_SKILL  # guarantee the skill is injected on the new session
         adapter._wm_tasks[key] = asyncio.create_task(_wm_flush(adapter, key))
         print(f"[hooks] WM recovered pending buffer {key}", flush=True)
         _log("debounce-hook", "buffer-recovered", "ok", key=key, chars=len(event.text or ""))
@@ -250,6 +257,7 @@ def install_patches() -> None:
             return
 
         key = self._text_batch_key(event)
+        event.auto_skill = WM_SKILL  # deterministic skill injection on new sessions
         existing = self._wm_buffers.get(key)
         if existing is None:
             self._wm_buffers[key] = event

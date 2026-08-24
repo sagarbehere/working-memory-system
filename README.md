@@ -39,7 +39,10 @@ Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
   turn after a debounce window (default 25s). A lone `.` or `/done`
   flushes immediately. Buffers are persisted to
   `$WM_ROOT/meta/pending-buffer.json` on every message, so a gateway
-  restart never loses an in-progress thought.
+  restart never loses an in-progress thought. Each buffered event is
+  stamped with `auto_skill` (`WM_SKILL`, default `working-memory`), so
+  Hermes **deterministically auto-loads the skill** into the lane's
+  session instead of relying on the model choosing to load it.
 - **`reminder-check.py`** — cron'd script that fires due reminders through
   the *existing* bot into the WM chat. Not a daemon.
 - **`setup.sh`** — creates the data skeleton + backup git repos (data +
@@ -64,7 +67,23 @@ Then:
 
 1. **Create the dedicated WM chat** (see above) and set
    `WM_TELEGRAM_CHAT_ID` (+ thread id if a topic lane) in
-   `~/.hermes/working-memory.env`.
+   `~/.hermes/working-memory.env`. For a DM-topic lane, also register the
+   skill binding so the working-memory skill auto-loads natively (the
+   hook stamps `auto_skill` regardless — this is a second, config-level
+   layer):
+
+   ```yaml
+   # in ~/.hermes/config.yaml
+   platforms:
+     telegram:
+       extra:
+         dm_topics:
+           - chat_id: 143386153
+             topics:
+               - name: Working Memory
+                 thread_id: 87471
+                 skill: working-memory
+   ```
 2. **Cron** — `crontab -e` and paste the line from `crontab.example`
    (every 5 minutes).
 3. **Restart the gateway** so the hook loads: `hermes gateway restart`

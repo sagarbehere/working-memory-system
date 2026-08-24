@@ -80,6 +80,9 @@ async def scenario(mod, tmp, ev):
     s = make_stub(__import__("gateway.platforms.telegram", fromlist=["x"]))
     s._enqueue_text_event(ev("first message"))
     assert s.dispatched == [], "must not dispatch before the debounce elapses"
+    assert s._wm_buffers["key:111"].auto_skill == "working-memory", (
+        "buffered event must carry auto_skill for deterministic skill injection"
+    )
     pf = tmp / "wm/meta/pending-buffer.json"
     assert pf.exists(), "buffer must be persisted on every message"
     blob = json.loads(pf.read_text())
@@ -111,6 +114,9 @@ async def scenario(mod, tmp, ev):
     )
     s3 = make_stub(__import__("gateway.platforms.telegram", fromlist=["x"]), recovered=False)
     s3._enqueue_text_event(ev("continuation"))
+    assert s3._wm_buffers["key:111"].auto_skill == "working-memory", (
+        "recovered event must also carry auto_skill"
+    )
     await asyncio.sleep(0.6)
     assert s3.dispatched == ["recovered thought\ncontinuation"], s3.dispatched
     # 7: non-WM chat falls through to original batching (spec Section 2)
