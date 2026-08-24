@@ -46,12 +46,6 @@ check(handler._reservation_action("reserve a table for two") is None, "non-reser
 check(handler._reservation_action("unreserved seats") is None, "unreserve no word boundary")
 check(handler._reservation_action("note printer") is None, "marker not reservation")
 
-# --- marker stripping ---
-check(handler._strip_marker("note printer arrived", "note") == "printer arrived", "strip note+space")
-check(handler._strip_marker("note: printer", "note") == "printer", "strip note+colon")
-check(handler._strip_marker("Hey memory, vitamin D", "hey memory") == "vitamin D", "strip hey memory+comma")
-check(handler._strip_marker("hey memory", "hey memory") == "", "strip to empty")
-
 # --- lane keys / reservation round-trip ---
 class FakePlatform:
     value = "telegram"

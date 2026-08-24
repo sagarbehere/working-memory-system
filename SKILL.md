@@ -14,7 +14,7 @@ metadata:
 
 Personal working-memory system: the user captures thoughts via Telegram in a **dedicated chat** (spec Section 2); you do all filing, retrieval, reminders, and cleanup. Raw log is ground truth; topic files are derived caches; everything is reversible.
 
-**Scope guard (v2, spec Section 18):** working-memory input is any message that (a) arrives in a **reserved lane** — a chat previously reserved in-band with "reserve this chat for working memory", recorded in `meta/lanes.json`, or the legacy env-declared lane (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID` in `~/.hermes/working-memory.env`) — or (b) starts with a **marker**: `Hey memory` or `note` (case-insensitive, word boundary, stripped before you see it). Everything else is NOT working-memory input — answer as a normal assistant and file nothing.
+**Scope guard (v2, spec Section 18):** working-memory input is any message that (a) arrives in a **reserved lane** — a chat previously reserved in-band with "reserve this chat" / "reserve this chat for working memory", recorded in `meta/lanes.json`, or the legacy env-declared lane (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID` in `~/.hermes/working-memory.env`) — or (b) starts with a **marker**: `Hey memory` or `note` (case-insensitive, word boundary). The capture-gate hook has already buffered and skill-stamped the message, and it deliberately leaves the marker visible so you can route on it — **strip the marker token before filing** (Capture below). Everything else is NOT working-memory input — answer as a normal assistant and file nothing.
 
 **Lane identity = chat + thread, not session.** The lane is the topic identified by `WM_TELEGRAM_CHAT_ID` + `WM_TELEGRAM_THREAD_ID` (the "Working Memory" topic inside the bot DM). It is independent of which Hermes session is currently bound to that topic: `/new` (fresh session, same topic) and compression-driven session rotation (old session sealed `compression`, child session continues) do NOT disconnect the lane — the debounce hook and the `dm_topics` skill binding key on chat+thread only, and all durable data lives in `$WM_ROOT` files, not in the conversation context. When explaining WM to the user: "lane" is a working-memory-system term, not Hermes vocabulary (topic = Telegram layer, session = Hermes layer). Full session model: see the `hermes-session-lifecycle` skill.
 
@@ -39,6 +39,11 @@ Layout under `$WM_ROOT` (a git repo — commit after every write batch):
 4. Ordinary chit-chat unrelated to memory → answer normally, file nothing.
 
 ## Capture
+
+If the item text still starts with a marker token (`note` / `Hey memory`, or
+the short/long reservation forms), **strip it before writing the raw entry**
+— the hook leaves it in the text deliberately for routing; it must not appear
+in the entry or the tags.
 
 Write one raw entry per capture item:
 

@@ -802,8 +802,9 @@ the point of a syntactic marker); the extraction pass's chit-chat rule
 actually memory, so a stray "note that the build failed" is filed only
 if it is genuinely a note.
 
-The marker is stripped from the text before extraction, so it is never
-filed as part of an entry.
+The marker is deliberately left in the text when the gate dispatches it:
+the skill's scope guard routes on it, and the extraction pass strips it
+before writing, so it is never filed as part of an entry.
 
 The marker is deliberately a natural-language prefix, not a slash
 command: it works identically on every platform (Telegram, web UI, CLI,
@@ -829,8 +830,9 @@ else:
    unlikely; the confirmation makes them visible if they happen.
 2. If the message starts with a marker, or its chat is in
    `meta/lanes.json` (marker implied), → set `auto_skill:
-   working-memory` (deterministic skill load) and strip the marker if
-   one is present.
+   working-memory` (deterministic skill load). The marker is left in
+   the text — the extraction pass strips it (18.2) so the skill's scope
+   guard can route on it.
 3. Buffer marked messages with a **short debounce** (default 5s,
    tunable `WM_MARKER_DEBOUNCE_SECONDS`) before flushing as one agent
    turn, so a quick follow-up ("note printer arrived" + "ink is low")

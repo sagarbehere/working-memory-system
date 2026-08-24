@@ -20,8 +20,10 @@ inputs qualify as working-memory input:
 Markers and lane messages are buffered with a debounce before being
 flushed as ONE agent turn (markers: short 5s; reserved lanes: 25s, the
 v1 default), stamped with ``auto_skill`` so the working-memory skill
-loads deterministically, and the marker token is stripped before
-extraction.
+loads deterministically. The marker is deliberately LEFT in the text:
+the skill's scope guard needs to see it to route the message, and the
+skill strips it at extraction time (spec Section 18.2) so it never
+appears in a raw entry.
 
 Everything else falls through to the original handler untouched
 (no-op default) — the gate costs one string prefix check + one
@@ -232,12 +234,6 @@ def _reservation_action(text) -> "str | None":
     return None
 
 
-def _strip_marker(text, marker) -> str:
-    """Strip the marker token plus following whitespace/punctuation."""
-    rest = text[len(marker):].lstrip(" \t:,.;!?-")
-    return rest.strip()
-
-
 # -------------------------------------------------------------- buffer
 
 def _persist(adapter) -> None:
@@ -385,9 +381,9 @@ def install_patches() -> None:
                 asyncio.create_task(_dispatch_now(self, buffered))
             return
 
-        if marker:
-            event.text = _strip_marker(event.text, marker)
         event.auto_skill = WM_SKILL  # deterministic skill injection on new sessions
+        # Marker stays visible — the skill's scope guard routes on it and
+        # the extraction pass strips it before filing (spec 18.2/18.3).
 
         existing = self._wm_buffers.get(key)
         if existing is None:
