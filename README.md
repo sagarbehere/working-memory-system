@@ -50,6 +50,9 @@ Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
   the *existing* bot into the WM chat. Not a daemon.
 - **`setup.sh`** — creates the data skeleton + backup git repos (data +
   package), installs the skill and hook, writes the runtime env.
+- **`export.sh`** — one-command bundle of the whole system (package +
+  data, both with git history, plus install notes) for copying to another
+  machine or an off-box backup. No secrets included.
 - **`crontab.example`** — the exact cron line for the reminder check.
 
 It deliberately contains **no** Telegram bot token flow, no Telegram
