@@ -813,8 +813,9 @@ A minimal hook on the base adapter's inbound seam (the shared path every
 platform's MessageEvent passes through) does three things, and nothing
 else:
 
-1. If the message starts with a marker → set `auto_skill:
-   working-memory` (deterministic skill load) and strip the marker.
+1. If the message starts with a marker, or its chat is the designated
+   lane (marker implied), → set `auto_skill: working-memory`
+   (deterministic skill load) and strip the marker if one is present.
 2. Buffer marked messages with a **short debounce** (default 5s,
    tunable `WM_MARKER_DEBOUNCE_SECONDS`) before flushing as one agent
    turn, so a quick follow-up ("note printer arrived" + "ink is low")
@@ -860,12 +861,14 @@ Both mechanisms are kept, and they are complementary, not redundant:
   net: if the lane's topic is ever deleted, the system degrades to
   marker mode everywhere and nothing breaks.
 
-Config cost: one optional entry designating the lane (platform + chat_id
-+ thread_id), where the marker is implied. The lane is convenience, not
-dependency: deleting it falls back to marker mode with reminders going
-to origin/home, no self-healing machinery required for correctness;
-re-binding is a one-line config change (or, at most, a lazy re-adoption
-by name as a future nice-to-have).
+Config cost: **none beyond what v1 already has.** The lane is designated
+by the existing `WM_TELEGRAM_CHAT_ID` / `WM_TELEGRAM_THREAD_ID` env
+variables — no new config file, no registry, no schema. Marker mode
+requires zero config at all. The lane is convenience, not dependency:
+deleting the env vars (or the topic) falls back to marker mode with
+reminders going to origin/home, no self-healing machinery required for
+correctness; re-binding is editing the env vars again (or, at most, a
+lazy re-adoption by name as a future nice-to-have).
 
 ### 18.6 Web UI and CLI
 
@@ -930,6 +933,7 @@ throughout.
 5. **Reminder origin schema** — extend the reminder record with origin
    {platform, chat_id, thread_id?}; confirm the home-channel fallback
    value.
-6. **Optional lane config** — final shape (one auto-capture entry:
-   platform + chat_id + thread_id), and whether to adopt-by-name on
-   recreation.
+6. **Optional lane config — RESOLVED.** The lane reuses the existing
+   `WM_TELEGRAM_CHAT_ID` / `WM_TELEGRAM_THREAD_ID` env vars (plus the
+   config.yaml `dm_topics` binding); no new config format. Adopt-by-name
+   on recreation remains a future nice-to-have, not required.
