@@ -54,6 +54,13 @@ Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
   data, both with git history, plus install notes) for copying to another
   machine or an off-box backup. No secrets included.
 - **`crontab.example`** — the exact cron line for the reminder check.
+- **Nightly consolidation job** — a Hermes cron job (separate from the OS
+  crontab) registered via the agent: schedule `30 2 * * *`, loads the
+  `working-memory` skill, runs the Consolidation pass (see SKILL.md), and
+  reports to the WM chat. Lives in Hermes's cron store — re-create it on a
+  new machine by asking the agent to "recreate the working-memory
+  consolidation cron job" (the *policy* ships in SKILL.md, the
+  *registration* is per-install).
 
 It deliberately contains **no** Telegram bot token flow, no Telegram
 client, and no scheduler daemon — it reuses the infrastructure Hermes

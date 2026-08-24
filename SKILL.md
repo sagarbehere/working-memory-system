@@ -39,6 +39,8 @@ Layout under `$WM_ROOT` (a git repo — commit after every write batch):
 
 Write one raw entry per capture item:
 
+- **Dedup first**: before writing, check the current month's `raw/YYYY-MM.md` (and peek at `meta/pending-buffer.json`) for a verbatim or near-identical recent entry. If the fact is already stored (re-send, duplicate delivery, user repeating themselves), do NOT write a second entry — just confirm to the user it's already on file, and offer to log a follow-up update if they've moved past it. A duplicate capture is log pollution, not safety.
+
 ```
 ## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
 tags: health, vitamin-d
@@ -56,7 +58,7 @@ supersedes: 20260817-1610-01
 - Update `meta/tag-index.json` in the **same operation** as the append (append entry id, bump count) — never as a separate async step.
 - **Promotion**: when a tag's count reaches `WM_PROMOTE_AFTER` (default 2), create `topics/<tag>.md` backfilled from every raw entry carrying that tag.
 - **Size trigger**: if the topic file you'd append to exceeds `WM_CONDENSE_SIZE` (default 2500 bytes), rewrite it condensed instead of appending (see **Consolidation**).
-- **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time.
+- **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`.
 - `git add -A && git commit -m "capture: <short summary>"` after the write batch.
 - **Confirm** briefly after each processed buffer (skip when `WM_CONFIRM=0`): e.g. "logged 2 items: vitamin-d (reminder set Aug 31), printer".
 
