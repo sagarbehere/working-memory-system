@@ -4,7 +4,7 @@ Installed at ~/.hermes/hooks/working-memory-debounce/ and loaded by the
 gateway's HookRegistry at startup (gateway/run.py -> gateway/hooks.py).
 
 v2 (spec Section 18): the gate lives on the BASE adapter's inbound seam
-(``BaseAdapter.handle_message``), so it sees messages from every platform
+(``BasePlatformAdapter.handle_message``), so it sees messages from every platform
 (Telegram, api_server / Open WebUI, etc.), not just Telegram. Three
 inputs qualify as working-memory input:
 
@@ -335,9 +335,9 @@ def install_patches() -> None:
     Telegram /done interception.
     """
     global orig_handle_message
-    from gateway.platforms.base import BaseAdapter
+    from gateway.platforms.base import BasePlatformAdapter
 
-    orig_handle_message = BaseAdapter.handle_message
+    orig_handle_message = BasePlatformAdapter.handle_message
 
     def _ensure_state(self) -> None:
         if not hasattr(self, "_wm_buffers"):
@@ -349,7 +349,7 @@ def install_patches() -> None:
             _recover(self)
 
     async def wm_handle_message(self, event) -> None:
-        """Wrapper for BaseAdapter.handle_message — the shared gate."""
+        """Wrapper for BasePlatformAdapter.handle_message — the shared gate."""
         _ensure_state(self)
         text = (event.text or "").strip()
 
@@ -413,7 +413,7 @@ def install_patches() -> None:
             flush=True,
         )
 
-    BaseAdapter.handle_message = wm_handle_message
+    BasePlatformAdapter.handle_message = wm_handle_message
 
     # /done — Telegram command interception for the manual flush.
     # (Base has no _handle_command; other platforms rely on "." or the
@@ -476,7 +476,7 @@ def install_patches() -> None:
         )
     else:
         print(
-            f"[hooks] {HOOK_NAME}: patched BaseAdapter.handle_message "
+            f"[hooks] {HOOK_NAME}: patched BasePlatformAdapter.handle_message "
             f"(markers={MARKERS}, lanes={len(LANES)}, "
             f"lane_debounce={WM_DEBOUNCE}s, marker_debounce={WM_MARKER_DEBOUNCE}s, "
             f"root={WM_ROOT})",
