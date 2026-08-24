@@ -60,7 +60,11 @@ supersedes: 20260817-1610-01
 - **Size trigger**: if the topic file you'd append to exceeds `WM_CONDENSE_SIZE` (default 2500 bytes), rewrite it condensed instead of appending (see **Consolidation**).
 - **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`.
 - `git add -A && git commit -m "capture: <short summary>"` after the write batch.
-- **Confirm** briefly after each processed buffer (skip when `WM_CONFIRM=0`): e.g. "logged 2 items: vitamin-d (reminder set Aug 31), printer".
+- **Confirm** with ONE short line (skip entirely when `WM_CONFIRM=0`). Never
+  include ids, tags, file paths, commit hashes, or internal operational
+  details — the user doesn't want the machinery. Examples:
+  `✅ logged: printer` · `✅ logged 2: printer update, comet-service reminder (Tue 8:00 AM)` ·
+  `✅ reminder set: dentist Tue 8:00 AM`. For retrieval questions, just answer.
 
 ## Retrieve
 
@@ -116,7 +120,7 @@ Append a dated entry to `meta/refinement-log.md` (never rewrite it) when you not
 
 Review the log on each consolidation pass (weekly-ish). **Approval boundary:**
 - **Low-risk auto-tune:** adjusting a numeric threshold already flagged as tunable (`WM_DEBOUNCE_SECONDS`, `WM_PROMOTE_AFTER`, `WM_CONDENSE_SIZE`) based on observed friction — apply it, update `~/.hermes/working-memory.env`, and log the change + reasoning.
-- **Needs sign-off:** changes to classification rules, tag policy, splitting/supersession heuristics, or command-handling logic in SKILL.md — present the proposed change as a before/after diff via Telegram and WAIT for confirmation before it takes effect.
+- **Needs sign-off:** changes to classification rules, tag policy, splitting/supersession heuristics, or command-handling logic in SKILL.md — present the proposed change as a before/after diff via Telegram and WAIT for confirmation before it takes effect. **You must NEVER write to SKILL.md yourself, even for small clarifications** — that is always the user's call, no matter how obviously good the edit seems.
 - **Never self-patch:** anything in the deterministic code (the debounce hook, `reminder-check.py`) — surface it as a flagged issue to the user; do not edit code unsupervised.
 
 ## Failure handling
