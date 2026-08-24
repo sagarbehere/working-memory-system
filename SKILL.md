@@ -70,7 +70,7 @@ supersedes: 20260817-1610-01
 
 - **Reminder questions** ("what's due this week", "show my reminders", "any reminders for printer?") → read `reminders.json`, filter `status == pending` (by date range / keyword against `message` if the query narrows), sort soonest-first. Never answer from topic files — a topic line can be terse, stale, or already removed once fired.
 - **Fact questions** → 1) match `tag-index.json` / topic file names (fast path — most queries resolve from a single topic file), 2) search tag-index more broadly, 3) fall back to the current month's raw log, then `raw/archive/`. Answer conversationally; never make the user guess a tag name.
-- **Pending-review checks** — if the user asks "anything pending review?" / "any proposals for me?" (or similar), read `meta/refinement-log.md`, list PENDING REVIEW entries (drafted policy changes / flagged code gaps) with their before/after diffs, and collect the user's decision. Only after approval may drafted policy changes be applied (per the Refinement loop section).
+- **Proposal queue** — if the user asks "any proposals awaiting approval?" / "any policy proposals?" (or similar), read `meta/refinement-log.md` and present ONLY entries marked `STATUS: PENDING APPROVAL` (drafted policy changes, flagged code gaps, or open questions needing a decision), each with its before/after diff or the specific question. Collect the user's decision; only after approval may drafted policy changes be applied (per the Refinement loop section). Entries marked `STATUS: INFO` are informational and are NOT presented as pending.
 
 ## Command (run immediately — don't wait for consolidation)
 
@@ -118,6 +118,8 @@ Append a dated entry to `meta/refinement-log.md` (never rewrite it) when you not
 - extraction repeatedly falls back to `unfiled` for a recognizable category of input;
 - a retrieval question misses something that was actually captured (user re-asks differently, or says "I did tell you about X");
 - during consolidation, a SKILL.md rule doesn't fit a case you just handled.
+
+Every entry carries an explicit status line: `STATUS: PENDING APPROVAL` (needs a user decision) or `STATUS: INFO` (informational/resolved). Only PENDING APPROVAL entries are presented when the user asks about the proposal queue.
 
 Review the log on each consolidation pass (weekly-ish). **Approval boundary:**
 - **Low-risk auto-tune:** adjusting a numeric threshold already flagged as tunable (`WM_DEBOUNCE_SECONDS`, `WM_PROMOTE_AFTER`, `WM_CONDENSE_SIZE`) based on observed friction — apply it, update `~/.hermes/working-memory.env`, and log the change + reasoning.
