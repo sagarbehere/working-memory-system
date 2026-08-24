@@ -23,7 +23,7 @@ the source of truth.**
 
 **Version status:** Sections 1-17 describe **v1**, the deployed system
 (Telegram-only). Section 18 is a **proposed v2 generalization** — a
-marker-first design ("Hey memory" / "remember:") that makes working-memory
+marker-first design ("Hey memory" / "note") that makes working-memory
 input deterministic on any client without lane registries or thread-id
 dependencies — written for review and not yet implemented. Nothing in
 Section 18 is live until it is reviewed and signed off.
@@ -97,7 +97,7 @@ problem in practice, it's a candidate for the refinement loop (Section
 
 *v2 note (Section 18): the dedicated chat remains the frictionless path,
 but the boundary becomes a message marker rather than a chat. A message
-starting with "Hey memory" / "remember:" is WM input from any chat or
+starting with "Hey memory" / "note" is WM input from any chat or
 client; the dedicated chat survives only as an optional convenience where
 the marker is implied. The marker is a syntactic rule, not classification
 — determinism is preserved.*
@@ -779,20 +779,33 @@ configuration and failure.
 
 ### 18.2 The marker
 
-- **Primary marker:** a message whose text starts with `Hey memory`
-  (case-insensitive, allowing any following space or punctuation) is
-  working-memory input.
-- **Short alias:** `remember:` is accepted as an equivalent marker for
-  fast typing.
-- The marker covers all three routes: the extraction pass (Section 7)
-  classifies the message as capture, question, or command as usual — the
-  marker only says "this belongs to the WM system", it does not guess
-  intent.
-- The marker is stripped from the text before extraction, so it is never
-  filed as part of an entry.
-- The marker is deliberately a natural-language prefix, not a slash
-  command: it works identically on every platform (Telegram, web UI,
-  CLI, groups) without platform-specific command plumbing.
+Two markers, both matched case-insensitively at message start and
+followed by whitespace, punctuation, or end-of-message (a word-boundary
+rule, so "notebook" never matches "note"):
+
+- **Primary marker:** `Hey memory` — explicit, discoverable, and natural
+  to dictate ("Hey memory, vitamin D today").
+- **Short alias:** `note` — four letters, no special characters, one
+  word to dictate; chosen for rapid phone entry over `remember:` (the
+  colon costs extra keyboard taps and dictation mangles it). "note
+  printer arrived" is the intended ergonomics.
+
+The marker covers all three routes: the extraction pass (Section 7)
+classifies the message as capture, question, or command as usual — the
+marker only says "this belongs to the WM system", it does not guess
+intent. Messages that happen to start with the alias in ordinary
+conversation are routed into the WM pipeline deterministically (that is
+the point of a syntactic marker); the extraction pass's chit-chat rule
+(SKILL.md, Section 7) still answers normally anything that is not
+actually memory, so a stray "note that the build failed" is filed only
+if it is genuinely a note.
+
+The marker is stripped from the text before extraction, so it is never
+filed as part of an entry.
+
+The marker is deliberately a natural-language prefix, not a slash
+command: it works identically on every platform (Telegram, web UI, CLI,
+groups) without platform-specific command plumbing.
 
 ### 18.3 Capture gate (replaces the Telegram-only hook)
 
@@ -802,24 +815,23 @@ else:
 
 1. If the message starts with a marker → set `auto_skill:
    working-memory` (deterministic skill load) and strip the marker.
-2. Process immediately — **no debounce**. A marked message is a
-   deliberate capture; the 25s buffer existed to merge rapid-fire
-   unmarked thoughts in a dedicated chat, which no longer exists. If the
-   user sends a follow-up correction ("Hey memory, actually…"), the
-   `supersedes` mechanism (Section 7/8) reconciles it at consolidation
-   time.
+2. Buffer marked messages with a **short debounce** (default 5s,
+   tunable `WM_MARKER_DEBOUNCE_SECONDS`) before flushing as one agent
+   turn, so a quick follow-up ("note printer arrived" + "ink is low")
+   merges instead of splitting. The lane keeps its existing longer
+   debounce (default 25s, `WM_DEBOUNCE_SECONDS`) since rapid multi-
+   message thoughts are the lane's normal pattern. Either way, a
+   follow-up correction that lands after the flush reconciles via the
+   `supersedes` mechanism (Section 7/8) at consolidation time.
 3. Everything else falls through untouched (no-op default).
 
 Blast-radius control: marker-gated; non-marker traffic is byte-identical
 to stock behavior; verified per platform in Phase 1 (18.9).
 
-*Alternative considered (open item 18.10.4): drop the hook entirely and
-rely on the agent's automatic skill selection — the skill's description
-begins "Use when the user writes 'Hey memory'…", so the model reliably
-loads it. Deterministic-but-code (hook) vs simpler-but-probabilistic (no
-hook); the hook is the default because determinism is a core principle
-(Section 2/3), but this is the one place where simplicity could win on
-review.*
+Decision (resolved open item 18.10.4): **the hook is kept.** Deterministic
+skill loading is a core principle (Section 2/3); the hook is small, and
+relying on the model's skill auto-selection would make capture
+probabilistic. The no-hook alternative is rejected.
 
 ### 18.4 Delivery: reminders and confirmations go to the origin
 
@@ -832,22 +844,28 @@ review.*
   config value, and the "deleted topic" failure mode degrades to a
   one-line log entry instead of an endless retry loop.
 - Confirmations ("✅ logged …") reply to the chat where the capture
-  happened — natural with immediate processing.
+  happened — natural with the short debounce.
 
-### 18.5 Optional frictionless lane (demoted from v1's hard requirement)
+### 18.5 Frictionless lane AND marker — both, deliberately
 
-The dedicated chat is no longer required, but it remains a nice-to-have:
-one optional config entry designates a chat/topic where the marker is
-**implied** (auto-stamped, exactly like today). This preserves v1's
-zero-friction capture for the user's most-used client.
+Both mechanisms are kept, and they are complementary, not redundant:
 
-Critical property: the lane is convenience, not dependency. If that topic
-is deleted, the system simply falls back to marker mode everywhere —
-capture, retrieval, and reminders keep working (reminders go to
-origin/home). No self-healing machinery is required for correctness;
-re-binding the lane when the user recreates the topic is a one-line
-config change (or, at most, a lazy re-adoption by name as a future
-nice-to-have).
+- **The lane is the primary capture surface** — the user's most-used
+  client stays zero-friction: thoughts typed or dictated into the WM
+  topic need no marker (it is implied and auto-stamped, exactly like
+  today). Rapid entry is the priority, and the lane is how capture stays
+  instant.
+- **The marker is the universal path** — one message prefix that works
+  from every other client (web UI, CLI, any chat), and the resilience
+  net: if the lane's topic is ever deleted, the system degrades to
+  marker mode everywhere and nothing breaks.
+
+Config cost: one optional entry designating the lane (platform + chat_id
++ thread_id), where the marker is implied. The lane is convenience, not
+dependency: deleting it falls back to marker mode with reminders going
+to origin/home, no self-healing machinery required for correctness;
+re-binding is a one-line config change (or, at most, a lazy re-adoption
+by name as a future nice-to-have).
 
 ### 18.6 Web UI and CLI
 
@@ -873,12 +891,12 @@ delivery (18.4) change.
 - **Per-message marker overhead** — every capture and retrieval question
   must start with the marker (or come from the optional lane).
   Acceptable for a personal system; eliminates all per-platform config.
-- **No debounce** — rapid multi-message thoughts via marker split into
-  entries; `supersedes` reconciles at consolidation. Simpler code,
-  slightly more consolidation work.
+- **Short debounce** — marker-captured messages flush after ~5s (the
+  lane keeps ~25s); rapid follow-ups merge and confirmations arrive
+  within seconds.
 - **Hook still exists** — but it is a single small gate (marker match +
-  `auto_skill` stamp), far simpler than the registry-driven version; the
-  no-hook alternative (18.10.4) may remove it entirely.
+  `auto_skill` stamp), far simpler than the registry-driven version;
+  kept deliberately for deterministic skill loading (18.10.4).
 - **Optional lane keeps a small config** — one entry, vs. v1's env
   vars; deleting it breaks nothing.
 
@@ -900,16 +918,15 @@ throughout.
 
 ### 18.10 Open items (added by this section)
 
-1. **Marker syntax final** — `Hey memory` primary + `remember:` alias
-   (case-insensitive prefix match). Confirm the alias; consider one more
-   (e.g. `wm:`) only if the user wants it.
+1. **Marker syntax — RESOLVED.** Primary `Hey memory`; short alias
+   `note` (word-boundary match, no colon). Consider a third alias only
+   if real usage shows a need.
 2. **Marker stripping** — exact rule (strip the marker token(s) plus
    following whitespace/punctuation before extraction).
-3. **Debounce decision** — v2 default is immediate processing; keep the
-   option to restore a short debounce (e.g. 5s) for marked messages if
-   rapid follow-ups prove common.
-4. **Hook vs no-hook** — decide whether to keep the deterministic
-   capture gate or rely on skill auto-selection (18.3 alternative).
+3. **Debounce — RESOLVED.** Short debounce for marker messages (5s
+   default, `WM_MARKER_DEBOUNCE_SECONDS`); the lane keeps 25s.
+4. **Hook vs no-hook — RESOLVED.** Hook kept; deterministic skill load
+   is a core principle (18.3).
 5. **Reminder origin schema** — extend the reminder record with origin
    {platform, chat_id, thread_id?}; confirm the home-channel fallback
    value.
