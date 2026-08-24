@@ -3,8 +3,9 @@
 # copying to another machine (or backing up off-box).
 #
 # Includes:
-#   - the package (working-memory-system/): source, SKILL.md, hook, scripts,
-#     spec, tests, and its .git history
+#   - the package (working-memory-system/): source, SKILL.md, hook, scripts
+#     (reminder-check.py, wm-consolidation-gate.py, cron-session-prune.py,
+#     setup.sh, export.sh), spec, tests, backups/, and its .git history
 #   - the data (working-memory/): raw log, topics, tag index, reminders,
 #     refinement log, and its .git history (point-in-time recovery)
 #   - INSTALL-NOTES.txt: the per-install wiring values from THIS machine
@@ -68,10 +69,17 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "  3) EDIT ~/.hermes/working-memory.env for the target machine."
     echo "     Values on the SOURCE machine were:"
     grep -E '^(WM_|#)' "$HERMES_HOME/working-memory.env" 2>/dev/null | sed 's/^/       /' || true
-    echo "     NOTE: WM_TELEGRAM_CHAT_ID / WM_TELEGRAM_THREAD_ID are per-install —"
-    echo "     point them at the target's dedicated working-memory chat."
-    echo "  4) Register the DM-topic skill binding in ~/.hermes/config.yaml"
-    echo "     (only if using a DM topic lane; adjust chat_id/thread_id):"
+    echo "     v2 is marker-first (spec Section 18): capture works ANYWHERE by"
+    echo "     starting a message with 'Hey memory' or 'note' — the env vars"
+    echo "     are only a LEGACY seed for a frictionless lane and can be left"
+    echo "     empty. To reserve a chat as a lane instead, say 'reserve for"
+    echo "     memory' in it (release with 'release for memory')."
+    echo "  4) Optional convenience lane: if you want a dedicated topic, either"
+    echo "     set WM_TELEGRAM_CHAT_ID / WM_TELEGRAM_THREAD_ID in the env file"
+    echo "     (legacy seed) or reserve the chat in-band (step 3). A DM-topic"
+    echo "     skill binding in ~/.hermes/config.yaml is NOT required for v2"
+    echo "     marker capture; only add it if you also want the topic to"
+    echo "     auto-load the working-memory skill:"
     echo "       platforms:"
     echo "         telegram:"
     echo "           extra:"
@@ -83,11 +91,18 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "                       skill: working-memory"
     echo "  5) Add the cron line (crontab -e), see crontab.example:"
     sed 's/^/     /' "$PKG_DIR/crontab.example"
-    echo "  6) Re-create the nightly consolidation job — it lives in Hermes's"
-    echo "     cron store, not in this archive. Ask your agent:"
-    echo "     \"recreate the working-memory consolidation cron job\""
-    echo "     (schedule 30 2 * * * local, skills=[working-memory], deliver"
-    echo "     to the WM chat, toolsets file+terminal)."
+    echo "  6) Re-create the Hermes cron jobs — they live in Hermes's cron"
+    echo "     store, not in this archive. Ask your agent:"
+    echo "     a) \"recreate the working-memory consolidation cron job\""
+    echo "        (schedule 30 2 * * * local, skills=[working-memory],"
+    echo "        script=wm-consolidation-gate.py, deliver to the WM chat,"
+    echo "        toolsets file+terminal). The gate script is included in"
+    echo "        this package and symlinked to ~/.hermes/scripts/ by"
+    echo "        setup.sh — DO NOT recreate the job without attaching it,"
+    echo "        or it will mint a session every night even when idle."
+    echo "     b) \"recreate the monthly cron-session prune job\""
+    echo "        (no_agent script cron-session-prune.py, monthly, silent"
+    echo "        unless it pruned something)."
     echo "  7) Restart the gateway (from SSH):  hermes gateway restart"
     echo "  8) /reload-skills in Telegram so sessions pick up the skill."
     echo

@@ -111,6 +111,8 @@ Routine successful captures do NOT need their own log line — the raw entry alr
 
 ## Consolidation (nightly job + size triggers)
 
+**Nightly cron is gated (since 2026-08-24):** job `c4a8d6397a90` (02:30) runs `~/.hermes/scripts/wm-consolidation-gate.py` as its context script. The gate prints a work-digest only when there IS work — new raw entries since the last logged consolidation, topics over `WM_CONDENSE_SIZE`, raw files due for rotation, logs due for deletion, or `STATUS: PENDING APPROVAL` entries. Empty stdout → scheduler skips the AI call entirely: no session, no tokens, no delivery. **A silent night is normal, not a failed run** — don't tell the user the job broke. When the gate emits, its digest is injected as context; run the pass below on that work. Gate reads `last_consolidation_ts` from `logs/YYYY-MM.log` lines with `component == "consolidation"`, so the consolidation log line stays load-bearing.
+
 - Collapse recurring log entries into a rolling summary ("vitamin D weekly, last taken Aug 24", not one line per occurrence).
 - Apply `supersedes`: newer fact replaces the older line rather than appending alongside it.
 - Split an overgrown topic into more specific ones, or merge overlapping ones, when useful — safe, because the raw log is unaffected.

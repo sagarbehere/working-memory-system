@@ -56,6 +56,17 @@ ln -sfn "$PKG_DIR/hooks/working-memory-debounce" \
   "$HERMES_HOME/hooks/working-memory-debounce"
 echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 
+# 4b. Install the cron helper scripts (symlink — the package is the single
+#     source of truth; cron jobs reference them by relative name, which
+#     resolves under ~/.hermes/scripts/):
+#       - wm-consolidation-gate.py  -> nightly consolidation gate (context
+#         script: empty output = no work = scheduler skips the AI call)
+#       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
+mkdir -p "$HERMES_HOME/scripts"
+ln -sfn "$PKG_DIR/wm-consolidation-gate.py" "$HERMES_HOME/scripts/wm-consolidation-gate.py"
+ln -sfn "$PKG_DIR/cron-session-prune.py" "$HERMES_HOME/scripts/cron-session-prune.py"
+echo "Cron scripts installed: $HERMES_HOME/scripts/wm-consolidation-gate.py, cron-session-prune.py (symlinks)"
+
 # 5. Runtime env (never overwrite user edits)
 if [ ! -f "$HERMES_HOME/working-memory.env" ]; then
   cp "$PKG_DIR/.env.example" "$HERMES_HOME/working-memory.env"
