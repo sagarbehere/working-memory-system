@@ -31,8 +31,11 @@ Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
 ## What this package adds (nothing more)
 
 - **SKILL.md** — the operational policy the agent follows on every
-  capture/consolidation pass (installed to `~/.hermes/skills/`; git-tracked
-  here, per spec Section 17).
+  capture/consolidation pass. Installed as a **symlink** into
+  `~/.hermes/skills/` pointing at the package, so the package is the
+  single source of truth and every edit applies immediately (after
+  `/reload-skills` or a new session). Git-tracked here, per spec
+  Section 17.
 - **The debounce hook** (`hooks/working-memory-debounce/`) — wraps the
   *already-running* Hermes Telegram adapter, **only for the dedicated WM
   chat**: text messages are buffered per chat and flushed as one agent

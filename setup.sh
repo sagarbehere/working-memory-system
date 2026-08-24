@@ -38,11 +38,14 @@ else
   echo "Git repo already up to date."
 fi
 
-# 3. Install the skill
+# 3. Install the skill (SYMLINK, like the hook — the package is the single
+#    source of truth; package edits apply immediately after /reload-skills
+#    or a new session. The git-tracked copy is the canonical one, so every
+#    accepted refinement is diffable/revertible, spec Section 17.)
 SKILL_DEST="$HERMES_HOME/skills/note-taking/working-memory"
 mkdir -p "$SKILL_DEST"
-cp "$PKG_DIR/SKILL.md" "$SKILL_DEST/SKILL.md"
-echo "Skill installed: $SKILL_DEST/SKILL.md"
+ln -sfn "$PKG_DIR/SKILL.md" "$SKILL_DEST/SKILL.md"
+echo "Skill installed (symlink): $SKILL_DEST/SKILL.md"
 
 # 4. Install the debounce hook (symlink, so package updates apply immediately)
 mkdir -p "$HERMES_HOME/hooks"
