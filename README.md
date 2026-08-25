@@ -66,8 +66,15 @@ Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
   session instead of relying on the model choosing to load it.
 - **`reminder-check.py`** — cron'd script that fires due reminders through
   the *existing* bot into the WM chat. Not a daemon.
+- **`wm-consolidation-gate.py`** / **`cron-session-prune.py`** — the two
+  cron helper scripts. **Copied** (not symlinked) into `~/.hermes/scripts/`
+  by `setup.sh`: Hermes' cron scheduler refuses to execute scripts that
+  resolve outside `~/.hermes/`, so a symlink into the package dir would
+  silently fail. Re-run `setup.sh` after a package update to refresh the
+  copies.
 - **`setup.sh`** — creates the data skeleton + backup git repos (data +
-  package), installs the skill and hook, writes the runtime env.
+  package), installs the skill and hook, copies the cron scripts, writes
+  the runtime env.
 - **`export.sh`** — one-command bundle of the whole system (package +
   data, both with git history, plus install notes) for copying to another
   machine or an off-box backup. No secrets included.
@@ -172,9 +179,9 @@ one folder (or its git history).
 - **Backup:** on-VPS git history only (spec Section 14 open item). To add
   an off-box copy later: push the repos to a private remote, or cron a
   `tar` + `scp`/rclone of `WM_ROOT`.
-- **Re-installing after `hermes update`:** the hook is a symlink into
-  `~/.hermes/hooks/`, so it survives; only re-run `./setup.sh` if the
-  paths changed.
+- **Re-installing after `hermes update`:** the hook and skill are symlinks
+  into `~/.hermes/`, so they survive; the cron scripts are **copies**, so
+  re-run `./setup.sh` after a package update to refresh them.
 - **Refinement loop (spec §17):** numeric threshold tweaks are auto-applied
   by the agent (logged); policy changes to SKILL.md are proposed to you
   for sign-off; the deterministic code is never self-edited.
