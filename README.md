@@ -1,133 +1,135 @@
 # Working Memory System
 
-A frictionless personal working-memory system on top of Hermes + Telegram.
-Thoughts are captured via Telegram with zero categorization effort; the
-Hermes agent handles all classification, filing, reminders, retrieval,
-and cleanup. The raw log is ground truth; topic files are derived caches;
-everything is reversible.
+A personal working-memory system on top of [Hermes Agent](https://hermes-agent.nousresearch.com): capture a thought in plain language, and the agent files it, tags it, retrieves it later, and reminds you on schedule — no folder structures, no categorization effort, no "notes app" to maintain. The raw log is ground truth; topic files are derived caches; **everything is reversible**.
+
+It was designed to be a *second brain with an archivist*: you talk, it organizes, and it learns from corrections.
 
 Full design rationale: [`working-memory-system-spec.md`](working-memory-system-spec.md).
 
-## v2: markers + reserved lanes (implemented)
+---
 
-Since v1, the system is **marker-first** (spec Section 18):
+## What it does
 
-- **Marker mode (zero config, any platform):** a message starting with
-  `Hey memory` or `note` (case-insensitive, word boundary) is
-  working-memory input — capture, retrieval, or commands — from *any*
-  chat or client (Telegram, web UI via the api_server adapter, CLI).
-  The marker stays visible for routing and is stripped at filing time; a
-  short 5s debounce merges quick follow-ups.
-- **Reserved lanes (frictionless):** exactly two phrases — `reserve for
-  memory` makes any chat a marker-free lane (recorded in
-  `$WM_ROOT/meta/lanes.json`); `release for memory` undoes it. The v1
-  env-declared chat (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID`) still works as
-  one pre-reserved legacy lane.
-- **Reminders deliver to the chat where they were captured**, with a
-  home-channel fallback (origin recorded per reminder, spec 18.4).
+- **Capture** — send a thought; it's split into atomic notes, tagged, and filed to an append-only, git-versioned raw log.
+- **Retrieval** — ask naturally ("what did I decide about X?", "what's due this week?") and get a conversational answer.
+- **Reminders** — "remind me Tuesday 8 am to call the plumber" becomes a scheduled message delivered to the chat where you captured it.
+- **Auto-topic promotion** — when the same topic recurs, it's distilled into a topic file; retrieval becomes one lookup instead of archaeology.
+- **Nightly consolidation** — duplicates collapse, superseded facts replace old ones, archives rotate. Quiet by default.
+- **Corrections** — "that's mis-filed, it's about X" / "merge A and B" / "forget Y" — handled immediately, nothing lost.
 
-## Scope: a dedicated chat (v1 design, still supported)
+## How it works (30 seconds)
 
-Only messages sent to a **dedicated working-memory chat** are captured.
-Every other chat with Hermes is completely unaffected and behaves as
-normal conversation always has. No classification step guesses whether a
-message is "for" the memory system — the chat boundary does that
-deterministically.
+A capture-gate hook wraps Hermes' message adapter and buffers text messages from **working-memory lanes** (see below), flushing them as one agent turn after a short debounce. The agent follows the policy in [`SKILL.md`](SKILL.md): classify → file → confirm. All durable state lives under one folder (`WM_ROOT`), itself a git repo for point-in-time backup. Reminders are fired by a tiny cron'd script through the bot you already run.
 
-Two ways to create the dedicated chat (same bot, same token — no new bot):
+## Prerequisites
 
-- **DM topic lane** (lightest): enable Telegram DM topics with the bot
-  (`/topic` — see its help for the one-time setup), then use one topic
-  lane as the WM chat. Set `WM_TELEGRAM_CHAT_ID` + `WM_TELEGRAM_THREAD_ID`.
-- **Private group**: create a group containing only you + the bot, and
-  make sure the bot is allowed to respond there (add the group to
-  `group_allowed_chats` under the telegram platform config). Set
-  `WM_TELEGRAM_CHAT_ID` to the group's id.
+- **Hermes Agent** installed and running with a connected gateway (Telegram recommended; any adapter works for marker capture).
+- **python-telegram-bot** installed in the Hermes environment (Telegram mode only).
+- **An LLM API key** configured in Hermes (the agent does the filing).
+- **crontab** available (for the reminder check; on macOS/Linux `cron` is built in).
+- **git** (used for the built-in backup repos).
 
-Until `WM_TELEGRAM_CHAT_ID` is set, the system is disabled.
-
-## What this package adds (nothing more)
-
-- **SKILL.md** — the operational policy the agent follows on every
-  capture/consolidation pass. Installed as a **symlink** into
-  `~/.hermes/skills/` pointing at the package, so the package is the
-  single source of truth and every edit applies immediately (after
-  `/reload-skills` or a new session). Git-tracked here, per spec
-  Section 17.
-- **The debounce hook** (`hooks/working-memory-debounce/`) — wraps the
-  *already-running* Hermes Telegram adapter, **only for the dedicated WM
-  chat**: text messages are buffered per chat and flushed as one agent
-  turn after a debounce window (default 25s). A lone `.` or `/done`
-  flushes immediately. Buffers are persisted to
-  `$WM_ROOT/meta/pending-buffer.json` on every message, so a gateway
-  restart never loses an in-progress thought. Each buffered event is
-  stamped with `auto_skill` (`WM_SKILL`, default `working-memory`), so
-  Hermes **deterministically auto-loads the skill** into the lane's
-  session instead of relying on the model choosing to load it.
-- **`reminder-check.py`** — cron'd script that fires due reminders through
-  the *existing* bot into the WM chat. Not a daemon.
-- **`wm-consolidation-gate.py`** / **`cron-session-prune.py`** — the two
-  cron helper scripts. **Copied** (not symlinked) into `~/.hermes/scripts/`
-  by `setup.sh`: Hermes' cron scheduler refuses to execute scripts that
-  resolve outside `~/.hermes/`, so a symlink into the package dir would
-  silently fail. Re-run `setup.sh` after a package update to refresh the
-  copies.
-- **`setup.sh`** — creates the data skeleton + backup git repos (data +
-  package), installs the skill and hook, copies the cron scripts, writes
-  the runtime env.
-- **`export.sh`** — one-command bundle of the whole system (package +
-  data, both with git history, plus install notes) for copying to another
-  machine or an off-box backup. No secrets included.
-- **`crontab.example`** — the exact cron line for the reminder check.
-- **Nightly consolidation job** — a Hermes cron job (separate from the OS
-  crontab) registered via the agent: schedule `30 2 * * *`, loads the
-  `working-memory` skill, runs the Consolidation pass (see SKILL.md), and
-  reports to the WM chat. Lives in Hermes's cron store — re-create it on a
-  new machine by asking the agent to "recreate the working-memory
-  consolidation cron job" (the *policy* ships in SKILL.md, the
-  *registration* is per-install).
-
-It deliberately contains **no** Telegram bot token flow, no Telegram
-client, and no scheduler daemon — it reuses the infrastructure Hermes
-already runs.
+---
 
 ## Install
 
-Prereqs (already in place on this VPS): Hermes with the Telegram gateway
-running, `python-telegram-bot` installed, a crontab available.
-
 ```bash
-cd ~/working-memory-system
+git clone https://github.com/<you>/working-memory-system
+cd working-memory-system
 ./setup.sh
 ```
 
+`setup.sh` (idempotent, safe to re-run):
+
+1. Creates the data skeleton at `~/working-memory` (`WM_ROOT`) and initializes its backup git repo.
+2. Symlinks `SKILL.md` into Hermes' skills directory and the hook into `~/.hermes/hooks/`.
+3. Copies the two cron helper scripts into `~/.hermes/scripts/` (copies, not symlinks — Hermes' cron scheduler refuses scripts outside `~/.hermes/`).
+4. Writes `~/.hermes/working-memory.env` from `.env.example` — **never overwrites** an existing file.
+
 Then:
 
-1. **Create the dedicated WM chat** (see above) and set
-   `WM_TELEGRAM_CHAT_ID` (+ thread id if a topic lane) in
-   `~/.hermes/working-memory.env`. For a DM-topic lane, also register the
-   skill binding so the working-memory skill auto-loads natively (the
-   hook stamps `auto_skill` regardless — this is a second, config-level
-   layer):
+1. **Reminder delivery** — Telegram users: `crontab -e` and paste the line from [`crontab.example`](crontab.example) (every 5 minutes; adjust paths). **No Telegram?** Skip the crontab and instead register a Hermes no_agent cron job (every 5 minutes, `script=reminder-check.py`, deliver to your home channel) — the script prints only due reminders, which the scheduler delivers verbatim to whatever channel Hermes speaks on.
+2. **Restart the gateway** so the hook loads: `hermes gateway restart` (run from SSH/terminal, *not* from inside an agent session — it deadlocks there).
+3. **`/reload-skills`** in your chat so the agent picks up the `working-memory` skill.
+
+That's it — **marker capture already works everywhere** (next section). The Telegram lane is an optional frictionless upgrade.
+
+---
+
+## Set up your capture surface
+
+The system has **three input modes**, all active at once. Pick what suits you:
+
+### Option A — Markers: any chat, any platform (zero config) ⭐
+
+Working-memory input is any message that **starts with `Hey memory` or `note`** (case-insensitive, word boundary):
+
+```
+note the printer warranty expires in March
+Hey memory remind me Tuesday 8 am to call the plumber
+Hey memory what did I decide about the printer?
+```
+
+Works from *any* chat or client — Telegram, the web UI, the CLI — with no setup at all. The marker is stripped at filing time; a short 5-second debounce merges quick follow-up messages into one entry.
+
+### Option B — Reserve a chat: marker-free lane (any platform)
+
+Turn *any* chat into a dedicated memory lane, no markers needed:
+
+- Send **`reserve for memory`** in the chat → it's recorded in `$WM_ROOT/meta/lanes.json` and everything you send there is working-memory input.
+- **`release for memory`** undoes it.
+
+This is chat-identity-based (chat + thread), not session-based: `/new`, compression, or restarts don't disconnect the lane.
+
+### Option C — Telegram dedicated lane (the frictionless classic)
+
+The original design: a dedicated chat where *every* message is captured. Same bot, same token — no new bot. Two ways to make it:
+
+**C1. Private group (simplest):**
+1. Create a Telegram group containing only you + your Hermes bot.
+2. Make sure the bot may respond there: add the group id to `group_allowed_chats` under the telegram platform config in `~/.hermes/config.yaml`.
+3. Set `WM_TELEGRAM_CHAT_ID` to the group's id in `~/.hermes/working-memory.env`.
+
+**C2. DM topic lane (no group needed):**
+1. Enable DM topics with the bot (`/topic` — see its help for the one-time setup).
+2. Use one topic (e.g. "Working Memory") as the lane.
+3. Set both `WM_TELEGRAM_CHAT_ID` and `WM_TELEGRAM_THREAD_ID` in `~/.hermes/working-memory.env`.
+4. *Optional but nice:* bind the skill to the topic in `~/.hermes/config.yaml` so the working-memory skill auto-loads natively (the hook already stamps it regardless — this is a second, config-level layer):
 
    ```yaml
-   # in ~/.hermes/config.yaml
    platforms:
      telegram:
        extra:
          dm_topics:
-           - chat_id: 143386153
+           - chat_id: <CHAT_ID>
              topics:
                - name: Working Memory
-                 thread_id: 87471
+                 thread_id: <THREAD_ID>
                  skill: working-memory
    ```
-2. **Cron** — `crontab -e` and paste the line from `crontab.example`
-   (every 5 minutes).
-3. **Restart the gateway** so the hook loads: `hermes gateway restart`
-   (from SSH — not from inside an agent session, which deadlocks).
-4. **`/reload-skills`** in the chat so the agent sees the
-   `working-memory` skill.
+
+5. Restart the gateway from SSH: `hermes gateway restart`.
+
+> Reminders fire back into the chat where they were captured (origin recorded per reminder), falling back to the home channel when the origin isn't deliverable.
+
+---
+
+## Using it
+
+| You say | What happens |
+|---|---|
+| `note printer is out of ink` | Captured, tagged, filed |
+| `Hey memory what's due this week?` | Pending reminders listed, soonest first |
+| `what did I decide about the printer?` | Answered from the topic file / raw log |
+| `remind me Tue 8 am to call the plumber` | Reminder scheduled, fires Tue 8 am |
+| `.` or `/done` | Flush the buffer immediately (skip the debounce wait) |
+| `that's mis-filed, it's about X` | Entry re-tagged, topic files regenerated |
+| `merge printer and electronics` | Topics merged (raw log untouched) |
+| `forget what I said about the taxi driver` | Fact struck from topic + raw entry (the one destructive action — the agent confirms first) |
+
+**In the Telegram lane**, no markers are needed — just send the thought. **Everywhere else**, prefix with `Hey memory`/`note`, or reserve the chat once with `reserve for memory`.
+
+---
 
 ## Storage layout
 
@@ -136,52 +138,64 @@ Then:
   raw/2026-08.md             # append-only raw entries, one file per month
   raw/archive/               # rotated raw files (> WM_RAW_RETENTION_DAYS)
   topics/<tag>.md            # derived topic files (regenerable)
-  reminders.json             # pending reminders {id, due_at, message, raw_entry_id, status}
+  reminders.json             # pending reminders {id, due_at, message, ...}
   logs/2026-08.log           # operational trail, JSON lines (~30 day retention)
   meta/tag-index.json        # tag -> entry ids + occurrence counts
   meta/pending-buffer.json   # unflushed capture buffer (hook-managed)
+  meta/lanes.json            # reserved chats (reserve/release)
   meta/refinement-log.md     # curated patterns worth reviewing (spec §17)
 ```
 
-Everything durable lives under `WM_ROOT`; a full backup is archiving that
-one folder (or its git history).
+Everything durable lives under `WM_ROOT`; a full backup is archiving that one folder (or its git history).
 
 ## Configuration (`~/.hermes/working-memory.env`)
 
 | Key | Default | Meaning |
 |---|---|---|
 | `WM_ROOT` | `~/working-memory` | storage root |
-| `WM_DEBOUNCE_SECONDS` | `25` | silence window before a buffer flushes |
+| `WM_DEBOUNCE_SECONDS` | `25` | silence window before a lane buffer flushes |
+| `WM_MARKER_DEBOUNCE_SECONDS` | `5` | debounce for marker-captured messages |
 | `WM_PROMOTE_AFTER` | `2` | tag occurrences before a topic file is created |
 | `WM_CONDENSE_SIZE` | `2500` | topic-file bytes that trigger condense-on-write |
 | `WM_RAW_RETENTION_DAYS` | `90` | raw files older than this move to `raw/archive/` |
 | `WM_CONFIRM` | `1` | brief "logged …" confirmation after each buffer |
-| `WM_TELEGRAM_CHAT_ID` | *(required)* | the dedicated WM chat; empty = disabled |
+| `WM_TELEGRAM_CHAT_ID` | *(optional)* | legacy Telegram lane; empty = no lane (markers still work) |
 | `WM_TELEGRAM_THREAD_ID` | *(optional)* | topic lane within the WM chat |
 
-## Usage (in the dedicated WM chat)
+---
 
-- **Capture:** just send the thought — typed, or dictated on-device and
-  reviewed before sending. Multiple rapid messages merge into one entry.
-- **Manual flush:** send `.` or `/done` to skip the debounce wait.
-- **Retrieval:** ask naturally ("what printer was I thinking of?",
-  "what's due this week?").
-- **Corrections:** "that's mis-filed, it's about X" / "merge printer and
-  electronics" / "forget what I said about the taxi driver" — run
-  immediately, nothing is lost (raw log is untouched).
+## Maintenance
 
-## Notes & known limits (v1)
+- **Reminder delivery** — two modes, auto-detected by `reminder-check.py`:
+  - *Telegram mode* (OS crontab line, every 5 min): sends via the existing bot into the chat where each reminder was captured. If it stops, reminders queue up and fire late; check `~/.hermes/logs/wm-reminders.log`.
+  - *stdout mode* (no Telegram configured): the script prints each due reminder to stdout and marks it fired — wire it as a Hermes no_agent cron job (every 5 minutes, `script=reminder-check.py`, deliver to your home channel) and the scheduler delivers the lines verbatim. Diagnostics go to stderr; stdout carries only reminder lines.
+- **Nightly consolidation** — a *Hermes* cron job (separate from the OS crontab), schedule `30 2 * * *`, with `wm-consolidation-gate.py` as its context script: the gate emits a work-digest only when there IS work, so quiet nights are normal (no tokens, no delivery). Register it on a new machine by asking your agent: *"recreate the working-memory consolidation cron job"* — the policy ships in SKILL.md, only the registration is per-install.
+- **Monthly session prune** — optional watchdog: `cron-session-prune.py` (no-agent cron job, silent unless it pruned something).
+- **After a Hermes update** — re-run `./setup.sh` to refresh the copied cron scripts (the skill/hook symlinks survive on their own).
+- **Refinement loop (spec §17)** — the agent logs recurring frictions; numeric threshold tweaks are auto-applied (logged), policy changes to SKILL.md are proposed for your sign-off, and the deterministic code is never self-edited.
 
-- **Recovery timing:** after a gateway restart, an unflushed buffer is
-  reloaded on the next message for that chat (never dropped — worst case
-  it waits for the next message or `.`/`/done`).
-- **Text only:** photos/locations bypass the debounce (stock behavior).
-- **Backup:** on-VPS git history only (spec Section 14 open item). To add
-  an off-box copy later: push the repos to a private remote, or cron a
-  `tar` + `scp`/rclone of `WM_ROOT`.
-- **Re-installing after `hermes update`:** the hook and skill are symlinks
-  into `~/.hermes/`, so they survive; the cron scripts are **copies**, so
-  re-run `./setup.sh` after a package update to refresh them.
-- **Refinement loop (spec §17):** numeric threshold tweaks are auto-applied
-  by the agent (logged); policy changes to SKILL.md are proposed to you
-  for sign-off; the deterministic code is never self-edited.
+## Troubleshooting
+
+- **Gateway restart deadlocks** — restart from SSH/terminal, not from inside an agent session (graceful drain waits for active agents).
+- **Hook not loading** — `hermes gateway restart` after install; the hook binds at `gateway:startup`.
+- **Silent consolidation nights** — normal by design (gated job). Only a *delivery* when there's work.
+- **Unflushed buffer after a restart** — reloaded on the next message for that chat; worst case it waits for the next message or `.`/`/done`. Never dropped.
+
+## Uninstall
+
+```bash
+rm ~/.hermes/hooks/working-memory-debounce
+rm ~/.hermes/skills/note-taking/working-memory/SKILL.md
+rm ~/.hermes/scripts/wm-consolidation-gate.py ~/.hermes/scripts/cron-session-prune.py
+# remove the crontab line, the Hermes cron jobs, and delete ~/working-memory if you want the data gone
+```
+
+## Notes & known limits
+
+- **Text only** — photos/locations bypass the debounce (stock behavior).
+- **Backup** — the on-box git history is your first backup; push `WM_ROOT` to a private remote or cron a `tar` + rclone for an off-box copy.
+- The package deliberately contains **no** bot token flow, no Telegram client, no scheduler daemon — it reuses the infrastructure Hermes already runs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

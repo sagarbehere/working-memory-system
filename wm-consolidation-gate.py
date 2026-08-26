@@ -24,7 +24,10 @@ import os
 import re
 import sys
 
-ENV_PATH = os.path.expanduser("~/.hermes/working-memory.env")
+HERMES_HOME = os.path.expanduser(
+    os.environ.get("HERMES_HOME") or "~/.hermes"
+)
+ENV_PATH = os.path.join(HERMES_HOME, "working-memory.env")
 DEFAULT_ROOT = os.path.expanduser("~/working-memory")
 
 
@@ -194,7 +197,7 @@ def pending_approvals(root: str) -> int:
 
 def main() -> int:
     env = load_env(ENV_PATH)
-    root = env.get("WM_ROOT", DEFAULT_ROOT)
+    root = os.path.expanduser(env.get("WM_ROOT", DEFAULT_ROOT))
     try:
         condense_size = int(env.get("WM_CONDENSE_SIZE", "2500"))
     except ValueError:

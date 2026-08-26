@@ -1,4 +1,9 @@
 # Working-memory reminder check — every 5 minutes.
-# Install: crontab -e, then paste the line below (adjust the path if the
-# package lives elsewhere). Logs land in ~/.hermes/logs/wm-reminders.log.
-*/5 * * * * /home/hermes/working-memory-system/reminder-check.py >> /home/hermes/.hermes/logs/wm-reminders.log 2>&1
+# Install: crontab -e, then paste the line below (replace the paths with
+# your own — the package dir and your ~/.hermes dir). Logs land in
+# ~/.hermes/logs/wm-reminders.log.
+#
+# No Telegram? Skip this line. Instead register a Hermes no_agent cron job
+# (every 5 minutes, script=reminder-check.py, deliver to your home channel):
+# the script prints only due reminders, which the scheduler delivers verbatim.
+*/5 * * * * /path/to/working-memory-system/reminder-check.py >> $HOME/.hermes/logs/wm-reminders.log 2>&1

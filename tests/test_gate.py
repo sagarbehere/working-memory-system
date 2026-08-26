@@ -11,6 +11,12 @@ import tempfile
 TMP = tempfile.mkdtemp(prefix="wmtest_")
 os.environ["WM_SKIP_PATCH"] = "1"          # don't monkey-patch at import
 os.environ["WM_ROOT"] = TMP                 # never touch real data
+# Hermetic: the hook seeds reserved lanes from the env file at import —
+# point it at a scratch env so the test never depends on the host machine's
+# ~/.hermes/working-memory.env (or its absence).
+os.environ["HERMES_HOME"] = TMP
+seed_env = pathlib.Path(TMP) / "working-memory.env"
+seed_env.write_text("WM_TELEGRAM_CHAT_ID=100200300\nWM_TELEGRAM_THREAD_ID=42\n")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "hooks" / "working-memory-debounce"))
 import handler  # noqa: E402
@@ -51,11 +57,11 @@ class FakePlatform:
 
 class FakeSource:
     platform = FakePlatform()
-    chat_id = "143386153"
-    thread_id = "87471"
+    chat_id = "100200300"
+    thread_id = "42"
 
-check(handler._lane_key(FakeSource()) == "telegram:143386153:87471", "lane key")
-check(handler._telegram_lane_key("143386153", "87471") == "telegram:143386153:87471", "telegram lane key")
+check(handler._lane_key(FakeSource()) == "telegram:100200300:42", "lane key")
+check(handler._telegram_lane_key("100200300", "42") == "telegram:100200300:42", "telegram lane key")
 check(handler._is_reserved(FakeSource()) is True, "env-seed lane reserved")
 
 class FakeSource2:
@@ -71,7 +77,7 @@ lanes_file = pathlib.Path(TMP) / "meta" / "lanes.json"
 check(lanes_file.exists(), "lanes.json written")
 data = json.loads(lanes_file.read_text())
 check("telegram:999:555" in data, "lanes.json contains new lane")
-check("telegram:143386153:87471" in data, "lanes.json contains env seed")
+check("telegram:100200300:42" in data, "lanes.json contains env seed")
 
 reloaded = handler._load_lanes()
 check("telegram:999:555" in reloaded, "reload picks up reservation")
@@ -80,7 +86,7 @@ handler._record_reservation(FakeSource2(), "unreserve")
 check(handler._is_reserved(FakeSource2()) is False, "unreserved after phrase")
 reloaded2 = handler._load_lanes()
 check("telegram:999:555" not in reloaded2, "reload drops unreserved lane")
-check("telegram:143386153:87471" in reloaded2, "env seed survives")
+check("telegram:100200300:42" in reloaded2, "env seed survives")
 
 # --- debounce knobs ---
 check(handler.WM_MARKER_DEBOUNCE == 5.0, "marker debounce default 5s")

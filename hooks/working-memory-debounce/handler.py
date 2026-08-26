@@ -45,6 +45,7 @@ import asyncio
 import json
 import os
 import pathlib
+import sys
 from datetime import datetime
 
 HOOK_NAME = "working-memory-debounce"
@@ -70,7 +71,9 @@ def _load_env_file(path):
 WM_ENV = _load_env_file(HERMES_HOME / "working-memory.env")
 # Allow WM_ROOT override via env (used by tests; otherwise runtime env file).
 WM_ROOT = pathlib.Path(
-    os.environ.get("WM_ROOT") or WM_ENV.get("WM_ROOT") or str(pathlib.Path.home() / "working-memory")
+    os.path.expanduser(
+        os.environ.get("WM_ROOT") or WM_ENV.get("WM_ROOT") or str(pathlib.Path.home() / "working-memory")
+    )
 )
 try:
     WM_DEBOUNCE = float(os.environ.get("WM_DEBOUNCE_SECONDS") or WM_ENV.get("WM_DEBOUNCE_SECONDS", "25"))
@@ -409,55 +412,72 @@ def install_patches() -> None:
 
     # /done — Telegram command interception for the manual flush.
     # (Base has no _handle_command; other platforms rely on "." or the
-    # debounce itself.)
-    try:
-        from gateway.platforms import telegram as tg
-        from gateway.platforms.base import MessageType
+    # debounce itself.) The telegram module moved from gateway/platforms/
+    # to plugins/platforms/ in Hermes v0.20.x. Prefer an ALREADY-LOADED
+    # module (the gateway imports the plugin when Telegram is enabled) —
+    # never force-import it here: a plugin module can pull in heavy stack,
+    # and non-Telegram installs must stay unaffected.
+    tg = None
+    for mod_name in (
+        "plugins.platforms.telegram.adapter",
+        "gateway.platforms.telegram",
+    ):
+        if mod_name in sys.modules:
+            tg = sys.modules[mod_name]
+            break
+    if tg is None:
+        try:
+            from gateway.platforms import telegram as tg  # legacy Hermes
+        except ImportError:
+            tg = None
+    if tg is not None:
+        try:
+            from gateway.platforms.base import MessageType
 
-        orig_command = tg.TelegramAdapter._handle_command
+            orig_command = tg.TelegramAdapter._handle_command
 
-        async def wm_command(self, update, context):
-            try:
-                msg = self._effective_update_message(update)
-            except Exception:
-                msg = None
-            if msg is not None and getattr(msg, "text", None):
-                raw = msg.text.strip()
-                cmd = raw.split()[0].split("@")[0].lower() if raw else ""
-                if cmd == "/done":
-                    chat_id = str(getattr(getattr(msg, "chat", None), "id", "") or "")
-                    thread_id = str(getattr(msg, "message_thread_id", "") or "")
-                    if _telegram_lane_key(chat_id, thread_id) not in LANES:
-                        return await orig_command(self, update, context)
-                    if not self._should_process_message(msg, is_command=True):
-                        return
-                    _ensure_state(self)
-                    event = self._build_message_event(
-                        msg, MessageType.COMMAND, update_id=update.update_id
-                    )
-                    key = _lane_key(event.source)
-                    buffered = self._wm_buffers.pop(key, None)
-                    prior = self._wm_tasks.pop(key, None)
-                    if prior and not prior.done():
-                        prior.cancel()
-                    _persist(self)
-                    if buffered is not None:
-                        _log("capture-gate", "manual-flush", "dispatched", trigger="/done", key=key)
-                        await orig_handle_message(self, buffered)
-                    else:
-                        _log("capture-gate", "manual-flush", "empty", trigger="/done", key=key)
-                        try:
-                            await context.bot.send_message(
-                                chat_id=msg.chat.id, text="Nothing buffered."
-                            )
-                        except Exception:
-                            pass
-                    return  # consumed — never reaches the "Unknown command" path
-            return await orig_command(self, update, context)
+            async def wm_command(self, update, context):
+                try:
+                    msg = self._effective_update_message(update)
+                except Exception:
+                    msg = None
+                if msg is not None and getattr(msg, "text", None):
+                    raw = msg.text.strip()
+                    cmd = raw.split()[0].split("@")[0].lower() if raw else ""
+                    if cmd == "/done":
+                        chat_id = str(getattr(getattr(msg, "chat", None), "id", "") or "")
+                        thread_id = str(getattr(msg, "message_thread_id", "") or "")
+                        if _telegram_lane_key(chat_id, thread_id) not in LANES:
+                            return await orig_command(self, update, context)
+                        if not self._should_process_message(msg, is_command=True):
+                            return
+                        _ensure_state(self)
+                        event = self._build_message_event(
+                            msg, MessageType.COMMAND, update_id=update.update_id
+                        )
+                        key = _lane_key(event.source)
+                        buffered = self._wm_buffers.pop(key, None)
+                        prior = self._wm_tasks.pop(key, None)
+                        if prior and not prior.done():
+                            prior.cancel()
+                        _persist(self)
+                        if buffered is not None:
+                            _log("capture-gate", "manual-flush", "dispatched", trigger="/done", key=key)
+                            await orig_handle_message(self, buffered)
+                        else:
+                            _log("capture-gate", "manual-flush", "empty", trigger="/done", key=key)
+                            try:
+                                await context.bot.send_message(
+                                    chat_id=msg.chat.id, text="Nothing buffered."
+                                )
+                            except Exception:
+                                pass
+                        return  # consumed — never reaches the "Unknown command" path
+                return await orig_command(self, update, context)
 
-        tg.TelegramAdapter._handle_command = wm_command
-    except Exception as exc:
-        print(f"[hooks] {HOOK_NAME}: /done interception unavailable: {exc}", flush=True)
+            tg.TelegramAdapter._handle_command = wm_command
+        except Exception as exc:
+            print(f"[hooks] {HOOK_NAME}: /done interception unavailable: {exc}", flush=True)
 
     if not LANES:
         print(

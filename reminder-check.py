@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Working-memory reminder checker.
 
-Run from the VPS crontab every few minutes (see crontab.example). Reads
-$WM_ROOT/reminders.json, fires every pending reminder whose due_at has
-passed — including any that came due while the VPS was down — sends it via
-the existing Hermes Telegram bot into the reminder's origin chat (the
-chat where it was captured — spec Section 18.4), falling back to the
-legacy working-memory lane (WM_TELEGRAM_CHAT_ID / THREAD_ID, spec
-Section 2/9) when the origin is missing or not deliverable by this
-script (non-Telegram origins such as the api_server/web UI). A failed
-send is never marked fired; it stays pending and retries on the next
-tick (spec Section 11). Every fire attempt is logged to
-$WM_ROOT/logs/YYYY-MM.log (JSON lines).
+Two delivery modes:
+
+* Telegram mode (default): run from the crontab every few minutes (see
+  crontab.example). Reads $WM_ROOT/reminders.json, fires every pending
+  reminder whose due_at has passed — including any that came due while the
+  machine was down — and sends it via the existing Hermes Telegram bot into
+  the reminder's origin chat (the chat where it was captured — spec Section
+  18.4), falling back to the legacy working-memory lane
+  (WM_TELEGRAM_CHAT_ID / THREAD_ID, spec Section 2/9) when the origin is
+  missing or not deliverable by this script. A failed send is never marked
+  fired; it stays pending and retries on the next tick (spec Section 11).
+  Every fire attempt is logged to $WM_ROOT/logs/YYYY-MM.log (JSON lines).
+
+* stdout mode (no Telegram): if TELEGRAM_BOT_TOKEN or
+  WM_TELEGRAM_CHAT_ID is unset, the script prints each due reminder to
+  stdout as one line and marks it fired. Wire it as a Hermes no_agent cron
+  job (every few minutes, script=reminder-check.py, deliver to your home
+  channel): the scheduler delivers non-empty stdout verbatim, so due
+  reminders reach whatever channel Hermes speaks on (web UI, Discord, ...).
+  In this mode delivery is the cron job's business — stdout carries only
+  reminder lines; diagnostics go to stderr.
 
 Stdlib only. Safe to run concurrently (flock single-flight guard).
 """
@@ -22,6 +32,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -138,17 +149,23 @@ def _resolve_target(reminder, default_chat, default_thread):
 
 def main():
     wm_env = _load_env(HERMES_HOME / "working-memory.env")
-    wm_root = pathlib.Path(wm_env.get("WM_ROOT") or str(HOME / "working-memory"))
+    wm_root = pathlib.Path(
+        os.path.expanduser(wm_env.get("WM_ROOT") or str(HOME / "working-memory"))
+    )
     chat_id = wm_env.get("WM_TELEGRAM_CHAT_ID", "").strip()
     thread_id = wm_env.get("WM_TELEGRAM_THREAD_ID", "").strip()
     token = _load_env(HERMES_HOME / ".env").get("TELEGRAM_BOT_TOKEN", "").strip()
 
-    if not token:
-        print("reminder-check: no TELEGRAM_BOT_TOKEN in ~/.hermes/.env", flush=True)
-        return 1
-    if not chat_id:
-        print("reminder-check: WM_TELEGRAM_CHAT_ID not set in working-memory.env", flush=True)
-        return 1
+    # Telegram mode needs both the bot token and a home lane to fall back
+    # to; without them, fall back to stdout mode (see module docstring).
+    telegram_mode = bool(token and chat_id)
+    if not telegram_mode:
+        print(
+            "reminder-check: Telegram not configured "
+            "(TELEGRAM_BOT_TOKEN / WM_TELEGRAM_CHAT_ID) — stdout mode; "
+            "deliver via a Hermes no_agent cron job (see README).",
+            file=sys.stderr, flush=True,
+        )
 
     reminders_path = wm_root / "reminders.json"
     if not reminders_path.exists():
@@ -190,34 +207,51 @@ def main():
             print(
                 f"  firing {r.get('id')} (due {r.get('due_at')}): "
                 f"{(r.get('message') or '')[:80]}",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
-            t_chat, t_thread, fell_back = _resolve_target(r, chat_id, thread_id)
-            if fell_back:
-                fell_back_log.append(r.get("id"))
-                _log(
-                    wm_root, "reminder-cron", "fire", "origin-fallback",
-                    reminder_id=r.get("id"),
-                    origin=r.get("origin") or "none",
-                )
-            ok, info = _send(token, t_chat, t_thread, r.get("message", "Reminder"))
-            if ok:
+            if telegram_mode:
+                t_chat, t_thread, fell_back = _resolve_target(r, chat_id, thread_id)
+                if fell_back:
+                    fell_back_log.append(r.get("id"))
+                    _log(
+                        wm_root, "reminder-cron", "fire", "origin-fallback",
+                        reminder_id=r.get("id"),
+                        origin=r.get("origin") or "none",
+                    )
+                ok, info = _send(token, t_chat, t_thread, r.get("message", "Reminder"))
+                if ok:
+                    r["status"] = "fired"
+                    r["fired_at"] = now.isoformat()
+                    if fell_back:
+                        r["delivered_via"] = "fallback"
+                    fired.append(r.get("id"))
+                    _log(
+                        wm_root, "reminder-cron", "fire", "sent",
+                        reminder_id=r.get("id"), attempts=info,
+                        origin=r.get("origin") or "legacy-lane",
+                    )
+                else:
+                    failed.append(r.get("id"))
+                    print(
+                        f"  send failed ({info}); leaving pending for next tick",
+                        file=sys.stderr, flush=True,
+                    )
+                    _log(
+                        wm_root, "reminder-cron", "fire", "failed",
+                        reminder_id=r.get("id"), error=str(info),
+                    )
+            else:
+                # stdout mode: the delivery payload IS stdout (the cron
+                # scheduler delivers it verbatim to the home channel).
+                print(f"🔔 {r.get('message', 'Reminder')}", flush=True)
                 r["status"] = "fired"
                 r["fired_at"] = now.isoformat()
-                if fell_back:
-                    r["delivered_via"] = "fallback"
+                r["delivered_via"] = "cron-stdout"
                 fired.append(r.get("id"))
                 _log(
-                    wm_root, "reminder-cron", "fire", "sent",
-                    reminder_id=r.get("id"), attempts=info,
+                    wm_root, "reminder-cron", "fire", "stdout",
+                    reminder_id=r.get("id"),
                     origin=r.get("origin") or "legacy-lane",
-                )
-            else:
-                failed.append(r.get("id"))
-                print(f"  send failed ({info}); leaving pending for next tick", flush=True)
-                _log(
-                    wm_root, "reminder-cron", "fire", "failed",
-                    reminder_id=r.get("id"), error=str(info),
                 )
 
         if fired or failed:
@@ -228,9 +262,10 @@ def main():
 
         pending = sum(1 for r in reminders if r.get("status") == "pending")
         print(
-            f"reminder-check: fired={len(fired)} failed={len(failed)} "
+            f"reminder-check: mode={'telegram' if telegram_mode else 'stdout'} "
+            f"fired={len(fired)} failed={len(failed)} "
             f"fallback={len(fell_back_log)} pending={pending}",
-            flush=True,
+            file=sys.stderr, flush=True,
         )
         return 0
     finally:

@@ -111,7 +111,9 @@ Routine successful captures do NOT need their own log line — the raw entry alr
 
 ## Consolidation (nightly job + size triggers)
 
-**Nightly cron is gated (since 2026-08-24):** job `c4a8d6397a90` (02:30) runs `~/.hermes/scripts/wm-consolidation-gate.py` as its context script. The gate prints a work-digest only when there IS work — new raw entries since the last logged consolidation, topics over `WM_CONDENSE_SIZE`, raw files due for rotation, logs due for deletion, or `STATUS: PENDING APPROVAL` entries. Empty stdout → scheduler skips the AI call entirely: no session, no tokens, no delivery. **A silent night is normal, not a failed run** — don't tell the user the job broke. When the gate emits, its digest is injected as context; run the pass below on that work. Gate reads `last_consolidation_ts` from `logs/YYYY-MM.log` lines with `component == "consolidation"`, so the consolidation log line stays load-bearing.
+**Nightly cron is gated (since 2026-08-24):** the consolidation job (registered per-install in Hermes' cron store, schedule `30 2 * * *`) runs `~/.hermes/scripts/wm-consolidation-gate.py` as its context script. The gate prints a work-digest only when there IS work — new raw entries since the last logged consolidation, topics over `WM_CONDENSE_SIZE`, raw files due for rotation, logs due for deletion, or `STATUS: PENDING APPROVAL` entries. Empty stdout → scheduler skips the AI call entirely: no session, no tokens, no delivery. **A silent night is normal, not a failed run** — don't tell the user the job broke. When the gate emits, its digest is injected as context; run the pass below on that work. Gate reads `last_consolidation_ts` from `logs/YYYY-MM.log` lines with `component == "consolidation"`, so the consolidation log line stays load-bearing.
+
+**Script install convention (2026-08-25):** `wm-consolidation-gate.py` and `cron-session-prune.py` in `~/.hermes/scripts/` are **copies, not symlinks** — Hermes' cron scheduler refuses to execute scripts that resolve outside `~/.hermes/`, so a symlink into the package dir silently fails. `setup.sh` installs them with `rm -f` + `install -m 755` (replacing any old symlink), so after editing the scripts in the package repo, re-run `./setup.sh` to refresh the copies; do NOT re-symlink them.
 
 - Collapse recurring log entries into a rolling summary ("vitamin D weekly, last taken Aug 24", not one line per occurrence).
 - Apply `supersedes`: newer fact replaces the older line rather than appending alongside it.
@@ -145,11 +147,14 @@ Review the log on each consolidation pass (weekly-ish). **Approval boundary:**
 ## Escalation
 
 If a request doesn't clearly fit the rules above, consult before improvising:
-- **Why** the system works this way → the full spec at `/home/hermes/working-memory-system/working-memory-system-spec.md` (e.g. why `command` items never become raw entries, why reminders have their own retrieval path, why markers + reserved lanes scope working-memory input — Section 18).
+- **Why** the system works this way → the full spec at
+  `working-memory-system-spec.md` in this package (e.g. why `command` items
+  never become raw entries, why reminders have their own retrieval path, why
+  markers + reserved lanes scope working-memory input — Section 18).
 - **v2 is IMPLEMENTED** (spec Section 18) → markers "Hey memory"/"note", in-chat reservation ("reserve this chat for working memory" → `meta/lanes.json`), origin-based reminder delivery. Honor them in live capture. Do NOT re-propose the rejected lane-registry design.
 - **How** it currently works → the implementation source in that package (the debounce hook `hooks/working-memory-debounce/handler.py`, `reminder-check.py`).
 - **What actually happened** on a past run → `$WM_ROOT/logs/YYYY-MM.log` (e.g. "why didn't my reminder fire yesterday" needs logs, not the spec or code — neither records runtime history).
 
 **Keeping the system updated:** when asked anything about how the working-memory system works (including odd or hypothetical questions), consult the spec, this skill, and the source BEFORE answering from memory. When you notice a gap, a repeated correction, or a case the rules don't fit, append a dated entry to `meta/refinement-log.md` (Refinement loop section above) — never rewrite it. Policy changes to SKILL.md always need the user's sign-off; changes to the deterministic code are flagged for the user, never self-made.
 
-SKILL.md is version-controlled in the package repo (`/home/hermes/working-memory-system`, git) — every accepted refinement is diffable and revertible.
+SKILL.md is version-controlled in the package repo (git) — every accepted refinement is diffable and revertible.
