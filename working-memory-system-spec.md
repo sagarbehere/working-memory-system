@@ -832,12 +832,11 @@ else:
    working-memory` (deterministic skill load). The marker is left in
    the text — the extraction pass strips it (18.2) so the skill's scope
    guard can route on it.
-3. Buffer marked messages with a **short debounce** (default 5s,
-   tunable `WM_MARKER_DEBOUNCE_SECONDS`) before flushing as one agent
-   turn, so a quick follow-up ("note printer arrived" + "ink is low")
-   merges instead of splitting. Reserved lanes keep the existing longer
-   debounce (default 25s, `WM_DEBOUNCE_SECONDS`) since rapid multi-
-   message thoughts are their normal pattern. Either way, a follow-up
+3. Buffer working-memory messages with a **short debounce** (default 5s,
+   tunable `WM_DEBOUNCE_SECONDS`) before flushing as one agent turn, so a
+   quick follow-up ("note printer arrived" + "ink is low") merges instead
+   of splitting. Rapid multi-message thoughts in a reserved lane merge the
+   same way; a lone `.` flushes immediately. Either way, a follow-up
    correction that lands after the flush reconciles via the
    `supersedes` mechanism (Section 7/8) at consolidation time.
 4. Everything else falls through untouched (no-op default).
@@ -959,8 +958,9 @@ throughout.
    if real usage shows a need.
 2. **Marker stripping** — exact rule (strip the marker token(s) plus
    following whitespace/punctuation before extraction).
-3. **Debounce — RESOLVED.** Short debounce for marker messages (5s
-   default, `WM_MARKER_DEBOUNCE_SECONDS`); the lane keeps 25s.
+3. **Debounce — RESOLVED.** Single debounce for all working-memory input
+   (5s default, `WM_DEBOUNCE_SECONDS`); the original 25s lane value and the
+   separate marker knob were consolidated in v2.0.1.
 4. **Hook vs no-hook — RESOLVED.** Hook kept; deterministic skill load
    is a core principle (18.3).
 5. **Reminder origin schema** — extend the reminder record with origin

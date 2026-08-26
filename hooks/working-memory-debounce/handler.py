@@ -76,13 +76,9 @@ WM_ROOT = pathlib.Path(
     )
 )
 try:
-    WM_DEBOUNCE = float(os.environ.get("WM_DEBOUNCE_SECONDS") or WM_ENV.get("WM_DEBOUNCE_SECONDS", "25"))
+    WM_DEBOUNCE = float(os.environ.get("WM_DEBOUNCE_SECONDS") or WM_ENV.get("WM_DEBOUNCE_SECONDS", "5"))
 except ValueError:
-    WM_DEBOUNCE = 25.0
-try:
-    WM_MARKER_DEBOUNCE = float(os.environ.get("WM_MARKER_DEBOUNCE_SECONDS") or WM_ENV.get("WM_MARKER_DEBOUNCE_SECONDS", "5"))
-except ValueError:
-    WM_MARKER_DEBOUNCE = 5.0
+    WM_DEBOUNCE = 5.0
 WM_SKILL = (os.environ.get("WM_SKILL") or WM_ENV.get("WM_SKILL", "working-memory")).strip() or "working-memory"
 PENDING_FILE = WM_ROOT / "meta" / "pending-buffer.json"
 LANES_FILE = WM_ROOT / "meta" / "lanes.json"
@@ -397,7 +393,7 @@ def install_patches() -> None:
                 existing.media_types.extend(event.media_types)
         _persist(self)
 
-        debounce = WM_MARKER_DEBOUNCE if marker else WM_DEBOUNCE
+        debounce = WM_DEBOUNCE
         prior = self._wm_tasks.get(key)
         if prior and not prior.done():
             prior.cancel()
@@ -490,7 +486,7 @@ def install_patches() -> None:
         print(
             f"[hooks] {HOOK_NAME}: patched BasePlatformAdapter.handle_message "
             f"(markers={MARKERS}, lanes={len(LANES)}, "
-            f"lane_debounce={WM_DEBOUNCE}s, marker_debounce={WM_MARKER_DEBOUNCE}s, "
+            f"debounce={WM_DEBOUNCE}s, "
             f"root={WM_ROOT})",
             flush=True,
         )

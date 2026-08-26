@@ -88,8 +88,7 @@ reloaded2 = handler._load_lanes()
 check("telegram:999:555" not in reloaded2, "reload drops unreserved lane")
 check("telegram:100200300:42" in reloaded2, "env seed survives")
 
-# --- debounce knobs ---
-check(handler.WM_MARKER_DEBOUNCE == 5.0, "marker debounce default 5s")
-check(handler.WM_DEBOUNCE == 25.0, "lane debounce default 25s")
+# --- debounce knob ---
+check(handler.WM_DEBOUNCE == 5.0, "debounce default 5s")
 
 print(f"ALL GATE TESTS PASSED ({passed} checks)")

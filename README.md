@@ -2,7 +2,7 @@
 
 A personal working-memory system on top of [Hermes Agent](https://hermes-agent.nousresearch.com): capture a thought in plain language, and the agent files it, tags it, retrieves it later, and reminds you on schedule — no folder structures, no categorization effort, no "notes app" to maintain. The raw log is ground truth; topic files are derived caches; **everything is reversible**.
 
-It was designed to be a *second brain with an archivist*: you talk, it organizes, and it learns from corrections.
+It is, at heart, a searchable copy of the parts of your memory you choose to write down — you talk, it organizes, and it learns from corrections.
 
 Full design rationale: [`working-memory-system-spec.md`](working-memory-system-spec.md).
 
@@ -76,7 +76,7 @@ Works from *any* chat or client — Telegram, the web UI, the CLI — with no se
 
 Turn *any* chat into a dedicated memory lane, no markers needed:
 
-- Send **`reserve for memory`** in the chat → it's recorded in `$WM_ROOT/meta/lanes.json` and everything you send there is working-memory input.
+- Send **`reserve for memory`** in the chat → it's recorded in `$WM_ROOT/meta/lanes.json` and **from then on no markers are needed: every message in that chat is memory input until you send `release for memory`**.
 - **`release for memory`** undoes it.
 
 This is chat-identity-based (chat + thread), not session-based: `/new`, compression, or restarts don't disconnect the lane.
@@ -153,8 +153,7 @@ Everything durable lives under `WM_ROOT`; a full backup is archiving that one fo
 | Key | Default | Meaning |
 |---|---|---|
 | `WM_ROOT` | `~/working-memory` | storage root |
-| `WM_DEBOUNCE_SECONDS` | `25` | silence window before a lane buffer flushes |
-| `WM_MARKER_DEBOUNCE_SECONDS` | `5` | debounce for marker-captured messages |
+| `WM_DEBOUNCE_SECONDS` | `5` | silence window before a buffered message flushes as one agent turn |
 | `WM_PROMOTE_AFTER` | `2` | tag occurrences before a topic file is created |
 | `WM_CONDENSE_SIZE` | `2500` | topic-file bytes that trigger condense-on-write |
 | `WM_RAW_RETENTION_DAYS` | `90` | raw files older than this move to `raw/archive/` |
@@ -192,7 +191,7 @@ rm ~/.hermes/scripts/wm-consolidation-gate.py ~/.hermes/scripts/cron-session-pru
 
 ## Notes & known limits
 
-- **Text only** — photos/locations bypass the debounce (stock behavior).
+- **Text-first captures** — the raw log stores text. Photos and locations are handled as ordinary messages and never become entries on their own; a photo with a caption in a reserved lane captures the caption text. If you want an image remembered, say so in words (e.g. `note the plumber's receipt is in my photos`).
 - **Backup** — the on-box git history is your first backup; push `WM_ROOT` to a private remote or cron a `tar` + rclone for an off-box copy.
 - The package deliberately contains **no** bot token flow, no Telegram client, no scheduler daemon — it reuses the infrastructure Hermes already runs.
 

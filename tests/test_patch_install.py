@@ -96,4 +96,4 @@ else:
     )
     print("PATCH INSTALL OK: TelegramAdapter._handle_command ->", tg_cls._handle_command.__name__)
 
-print("markers:", handler.MARKERS, "| lanes:", len(handler.LANES), "| debounce:", handler.WM_DEBOUNCE, "/", handler.WM_MARKER_DEBOUNCE)
+print("markers:", handler.MARKERS, "| lanes:", len(handler.LANES), "| debounce:", handler.WM_DEBOUNCE)
