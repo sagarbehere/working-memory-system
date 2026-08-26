@@ -34,7 +34,7 @@ A capture-gate hook wraps Hermes' message adapter and buffers text messages from
 ## Install
 
 ```bash
-git clone https://github.com/<you>/working-memory-system
+git clone https://github.com/sagarbehere/working-memory-system
 cd working-memory-system
 ./setup.sh
 ```
