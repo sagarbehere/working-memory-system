@@ -23,6 +23,13 @@ Two delivery modes:
   In this mode delivery is the cron job's business — stdout carries only
   reminder lines; diagnostics go to stderr.
 
+v3 (second brain): when TODOIST_MIRROR_ENABLED=true and TODOIST_API_TOKEN is
+set, pending reminders mirror into Todoist (project TODOIST_PROJECT) at each
+tick; mirrored reminders are NOT fired locally (Todoist's notification is the
+reminder) but stay as the durable record + fallback; completion is reconciled
+back (a task closed in Todoist marks the local entry done). Without the token,
+behavior is exactly v2: local firing only.
+
 Stdlib only. Safe to run concurrently (flock single-flight guard).
 """
 
@@ -111,7 +118,7 @@ def _send(token, chat_id, thread_id, text, retries=3):
     return False, last_err
 
 
-def _git_commit(wm_root, fired, failed):
+def _git_commit(wm_root, fired, failed, mirrored=()):
     try:
         subprocess.run(
             ["git", "-C", str(wm_root), "add", "-A"],
@@ -120,7 +127,7 @@ def _git_commit(wm_root, fired, failed):
         subprocess.run(
             [
                 "git", "-C", str(wm_root), "commit", "-q",
-                "-m", f"reminders: fired {len(fired)}, failed {len(failed)}",
+                "-m", f"reminders: fired {len(fired)}, failed {len(failed)}, mirrored {len(mirrored)}",
             ],
             check=False, capture_output=True,
         )
@@ -147,6 +154,70 @@ def _resolve_target(reminder, default_chat, default_thread):
     return default_chat, default_thread, True
 
 
+def _todoist_request(method, path, body=None, token=""):
+    """curl-backed Todoist API v1 call (urllib is TLS-reset by Cloudflare)."""
+    cmd = [
+        "curl", "-sf", "-m", "30", "-X", method,
+        "https://api.todoist.com/api/v1/" + path,
+        "-H", f"Authorization: Bearer {token}",
+    ]
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip() or out.stdout.strip() or f"curl exit {out.returncode}")
+    return json.loads(out.stdout) if out.stdout.strip() else None
+
+
+def _todoist_projects(token):
+    return (_todoist_request("GET", "projects", token=token) or {}).get("results", [])
+
+
+def _todoist_find_project(token, name):
+    for p in _todoist_projects(token):
+        if p.get("name") == name:
+            return p["id"]
+    return None
+
+
+def _todoist_ensure_project(token, name):
+    pid = _todoist_find_project(token, name)
+    if pid:
+        return pid
+    p = _todoist_request("POST", "projects", {"name": name}, token)
+    return p["id"] if p else None
+
+
+def _todoist_mirror(reminder, token, project, wm_root):
+    """Create the Todoist task for an unmirrored reminder. Returns id or None."""
+    try:
+        pid = _todoist_ensure_project(token, project)
+        if not pid:
+            return None
+        body = {"content": reminder.get("message", "Reminder"), "project_id": pid}
+        due = _parse_iso(reminder.get("due_at", ""))
+        if due is not None:
+            body["due_datetime"] = due.isoformat()
+        t = _todoist_request("POST", "tasks", body, token)
+        if t and t.get("id"):
+            return t["id"]
+    except Exception as exc:
+        _log(wm_root, "todoist-mirror", "mirror", "failed",
+             reminder_id=reminder.get("id"), error=str(exc))
+    return None
+
+
+def _todoist_completed(token, task_id, wm_root, reminder_id):
+    """True if the mirrored task is completed in Todoist (completed_at set)."""
+    try:
+        t = _todoist_request("GET", f"tasks/{task_id}", token=token)
+        return bool(t and t.get("completed_at"))
+    except Exception as exc:
+        _log(wm_root, "todoist-mirror", "reconcile", "failed",
+             reminder_id=reminder_id, error=str(exc))
+        return False
+
+
 def main():
     wm_env = _load_env(HERMES_HOME / "working-memory.env")
     wm_root = pathlib.Path(
@@ -155,6 +226,10 @@ def main():
     chat_id = wm_env.get("WM_TELEGRAM_CHAT_ID", "").strip()
     thread_id = wm_env.get("WM_TELEGRAM_THREAD_ID", "").strip()
     token = _load_env(HERMES_HOME / ".env").get("TELEGRAM_BOT_TOKEN", "").strip()
+    todoist_token = _load_env(HERMES_HOME / ".env").get("TODOIST_API_TOKEN", "").strip()
+    todoist_project = (wm_env.get("TODOIST_PROJECT") or "Hermes").strip()
+    mirror_enabled = bool(todoist_token) and wm_env.get(
+        "TODOIST_MIRROR_ENABLED", "false").strip().lower() == "true"
 
     # Telegram mode needs both the bot token and a home lane to fall back
     # to; without them, fall back to stdout mode (see module docstring).
@@ -190,10 +265,36 @@ def main():
         with reminders_path.open(encoding="utf-8") as fh:
             reminders = json.load(fh)
 
-        fired, failed, fell_back_log = [], [], []
+        fired, failed, fell_back_log, mirrored = [], [], [], []
+
+        if mirror_enabled:
+            # v3 §9: mirror unmirrored pending reminders into Todoist, and
+            # reconcile completion (closed in Todoist = done locally).
+            for r in reminders:
+                if r.get("status") != "pending":
+                    continue
+                if not (r.get("mirrored") and r.get("todoist_id")):
+                    task_id = _todoist_mirror(r, todoist_token, todoist_project, wm_root)
+                    if task_id:
+                        r["todoist_id"] = task_id
+                        r["mirrored"] = True
+                        mirrored.append(r.get("id"))
+                        _log(wm_root, "todoist-mirror", "mirror", "ok",
+                             reminder_id=r.get("id"), todoist_id=task_id)
+            for r in reminders:
+                if r.get("status") != "pending" or not r.get("todoist_id"):
+                    continue
+                if _todoist_completed(todoist_token, r["todoist_id"], wm_root, r.get("id")):
+                    r["status"] = "done"
+                    r["completed_at"] = _dt.datetime.now().astimezone().isoformat()
+                    _log(wm_root, "todoist-mirror", "reconcile", "done",
+                         reminder_id=r.get("id"), todoist_id=r["todoist_id"])
+
         for r in reminders:
             if r.get("status") != "pending":
                 continue
+            if r.get("mirrored") and r.get("todoist_id"):
+                continue  # v3 §9: Todoist's notification is the reminder
             due = _parse_iso(r.get("due_at", ""))
             if due is None:
                 print(
@@ -254,17 +355,17 @@ def main():
                     origin=r.get("origin") or "legacy-lane",
                 )
 
-        if fired or failed:
+        if fired or failed or mirrored:
             tmp = reminders_path.with_name("reminders.json.tmp")
             tmp.write_text(json.dumps(reminders, indent=2), encoding="utf-8")
             tmp.replace(reminders_path)
-            _git_commit(wm_root, fired, failed)
+            _git_commit(wm_root, fired, failed, mirrored)
 
         pending = sum(1 for r in reminders if r.get("status") == "pending")
         print(
             f"reminder-check: mode={'telegram' if telegram_mode else 'stdout'} "
             f"fired={len(fired)} failed={len(failed)} "
-            f"fallback={len(fell_back_log)} pending={pending}",
+            f"fallback={len(fell_back_log)} pending={pending} mirrored={len(mirrored)}",
             file=sys.stderr, flush=True,
         )
         return 0
