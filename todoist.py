@@ -97,6 +97,8 @@ def main():
 
     l = sub.add_parser("list")
     l.add_argument("--project", default=None, help="filter to one project (default: all projects)")
+    l.add_argument("--notes", action="store_true",
+                   help="fetch comments for tasks that have them (note_count > 0)")
 
     c = sub.add_parser("close")
     c.add_argument("--id", required=True)
@@ -142,15 +144,39 @@ def main():
                 print("[]")
                 return
             tasks = [t for t in tasks if t.get("project_id") == pid]
+        if args.notes:
+            # Comments live under /comments?task_id=; note_count is unreliable
+            # in v1 (stays 0 even with comments), so fetch per task directly.
+            for t in tasks:
+                try:
+                    data = _req("GET", f"comments?task_id={t['id']}") or {}
+                    t["_comments"] = [
+                        c.get("content") for c in data.get("results", [])
+                        if c.get("content")
+                    ]
+                except SystemExit:
+                    t["_comments"] = None  # one failed fetch doesn't kill the list
         for t in sorted(tasks, key=lambda x: (x.get("due") or {}).get("date") or ""):
-            print(json.dumps({
+            due = t.get("due") or {}
+            row = {
                 "id": t["id"], "content": t["content"],
                 "project": projects.get(t.get("project_id")),
                 "parent_id": t.get("parent_id"),
                 "completed_at": t.get("completed_at"),
-                "due": (t.get("due") or {}).get("date"),
+                "due": due.get("date"),
+                "due_string": due.get("string"),
+                "is_recurring": due.get("is_recurring"),
+                "updated_at": t.get("updated_at"),
                 "description": t.get("description"),
-            }))
+            }
+            if t.get("priority", 1) != 1:  # v1 default priority is 1
+                row["priority"] = t.get("priority")
+            labels = t.get("labels") or []
+            if labels:
+                row["labels"] = labels
+            if args.notes and t.get("_comments"):
+                row["comments"] = t["_comments"]
+            print(json.dumps(row))
     elif args.cmd == "completed":
         projects = {p["id"]: p["name"] for p in _projects()}
         # The API wants full ISO datetimes; date-only returns empty. Convert

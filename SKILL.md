@@ -119,6 +119,9 @@ and commit `~/working-memory` after the batch):
   → `todoist.py completed --since YYYY-MM-DD --until YYYY-MM-DD [--project NAME]`
   (completion-date view; `--by due` for the due-date view). Answer
   conversationally, grouped by project.
+- **Task details incl. comments** → `todoist.py list --notes` (adds a
+  `comments` array per task; note_count is unreliable in v1, so it fetches
+  per task).
 - **Structured records** ("when did I last buy X", "BP last month") →
   `records.py query --domain … --entity … --since … --until …`; answer
   conversationally. Prescription overlap → pull rows, diff `data_json` in
