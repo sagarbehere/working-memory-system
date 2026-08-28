@@ -149,6 +149,7 @@ def main():
                 "parent_id": t.get("parent_id"),
                 "completed_at": t.get("completed_at"),
                 "due": (t.get("due") or {}).get("date"),
+                "description": t.get("description"),
             }))
     elif args.cmd == "completed":
         projects = {p["id"]: p["name"] for p in _projects()}
