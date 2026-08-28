@@ -178,7 +178,8 @@ Entries carry `STATUS: PENDING APPROVAL` or `STATUS: INFO`. Categories include
 Approval boundary:
 - **Auto-tune:** numeric thresholds already flagged tunable — apply, log why.
 - **Sign-off required:** policy changes (classification rules, routing rules,
-  canonical-tag edits, SKILL.md) — present a before/after diff and WAIT.
+  SKILL.md edits; canonical-tag coining at capture time is exempt —
+  do-then-inform, schema §6) — present a before/after diff and WAIT.
 - **Sanctioned code flow (your approval):** on approval of a `CODE
   IMPROVEMENT` entry, implement on the `v3.0.0` branch — spec + skill + code
   together (docs describe the actual system), run the records.py round-trip
