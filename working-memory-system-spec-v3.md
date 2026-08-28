@@ -107,7 +107,8 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 ```
 ## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
 tags: health, vitamin-d
-type: log+reminder
+type: reminder
+domain: health, vitamin-d
 supersedes: 20260817-1610-01
 
 Took vitamin D pill. Next one due in a week.
@@ -117,8 +118,12 @@ Took vitamin D pill. Next one due in a week.
 
 - **id** — deterministic, timestamp-based.
 - **tags** — freeform, assigned by the extraction pass. No fixed vocabulary.
-- **type** — `log` / `reminder` / `log+reminder`.
-- **v3 classification** — raw entries additionally carry the extraction pass's classification (`second_brain_type`, `domain`, `status` where applicable) so routing is auditable and replayable from ground truth (see §7).
+- **type** — the v3 classification itself: `reminder | record | project |
+  reference | idea`. (v2's `log/reminder/log+reminder` is gone: a capture with
+  a due date splits into two items — a `record` for the event + a `reminder`
+  for the next due, per schema §3.1's habit model.)
+- **domain** — 1+ tags from the canonical list (`_meta/tags.md` in the vault).
+- **status / record_kind / subtype / file_ref** — as classified per §7.
 - **supersedes** — optional, raw entry id of a prior entry this one updates or replaces.
 
 ---
@@ -142,14 +147,16 @@ Took vitamin D pill. Next one due in a week.
 
 This pass does routing (capture/question/command) and, for captures, classification in one call:
 
-- Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — the classification per `second-brain-schema.md`:
-  - `second_brain_type`: `reminder | record | project | reference | idea`
+- Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — the classification per `second-brain-schema.md` (the **`type` field itself carries the v3 class**; no separate `second_brain_type`):
+  - `type`: `reminder | record | project | reference | idea`
   - if `record`: `record_kind`: `structured | narrative`
   - if `reference`: `subtype`: `entity | concept | procedure`
   - `domain`: 1+ flat tags, checked against the canonical list before coining a new one
   - if `project` or `reference`: `status`, defaulting to `active`
   - if a `record` or `reference` involves a file: `file_ref` (schema §12)
-  - `reminder` (`{due_at, message}`) when `second_brain_type: reminder`
+  - `reminder` (`{due_at, message}`) when `type: reminder`
+- **Habit captures split** per schema §3.1: "took vitamin D, next due Friday" →
+  two items — a `record` (the completion) + a `reminder` (the next due).
 - Classification heuristics: the structural cues from `second-brain-schema.md` §8 (due-date language → reminder; dated/factual/no action → record; open question/decision → project; "how do I"/stable entity → reference; musing/quote → idea). **Low confidence defaults to `record`** — cheapest to fix later, nothing silently lost.
 - `command` items are administrative/corrective instructions ("that's mis-filed," "merge these topics," "forget X") — handed to consolidation (Section 8), never producing a raw log entry. Corrections can now touch whichever store the original item was routed to (a vault note, a SQLite row, or a Todoist task) — same confirm-before-destructive rule.
 - Splitting is conservative — one coherent thought touching two tags stays one entry; split only for genuinely unrelated content.

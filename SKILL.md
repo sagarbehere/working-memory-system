@@ -13,10 +13,12 @@ metadata:
 # Working Memory v3 (Second Brain)
 
 Personal second-brain system: the user captures thoughts via any connected
-client; you classify, file, retrieve, and remind. **Raw log is ground truth**
-(`~/working-memory/raw/`) — every capture is written there first, then routed
-to its store. Everything derived (vault notes, SQLite rows, Todoist tasks) is
-regenerable or correctable; nothing is silently lost.
+client; you classify, file, retrieve, and remind. **The raw log is the
+immutable, full-text capture record and audit trail** (`~/working-memory/raw/`)
+— every capture is written there first, then routed to its store. Destinations
+(vault notes, SQLite rows, Todoist tasks) are the primary curated artifacts;
+**recovery is the backups' job** (vault git + ops-repo snapshots + Todoist
+exports), not a rebuild from the log.
 
 **Read before operating:** `second-brain-schema.md` (type/tag/status model —
 read this first), `second-brain-implementation-guide.md` (routing/backup
@@ -30,6 +32,8 @@ Working-memory input is any message that (a) arrives in a **reserved lane**
 `Hey memory` or `note` (case-insensitive, word boundary). The capture-gate
 hook already buffered and stamped it; **strip the marker token before filing**.
 Everything else is ordinary conversation — answer normally, file nothing.
+(In a reserved lane, chit-chat reaches the extraction pass, classifies as
+neither capture/question/command, and is answered normally — nothing filed.)
 
 ## Every incoming message: route it
 
@@ -48,8 +52,7 @@ Everything else is ordinary conversation — answer normally, file nothing.
 ```
 ## 2026-08-28T16:03:00+05:30 [id: 20260828-1603-01]
 tags: health, vitamin-d
-type: log+reminder
-second_brain_type: reminder
+type: reminder
 domain: health, vitamin-d
 supersedes: 20260817-1610-01
 
@@ -59,72 +62,74 @@ supersedes: 20260817-1610-01
 
 - id = deterministic timestamp; `-01`, `-02`… per flush. Dedup first (check
   current month raw + pending buffer; a duplicate re-send is NOT re-filed).
-- `type` stays `log` / `reminder` / `log+reminder` (v2 field).
-- **v3 fields** (classification per schema §7/§8): `second_brain_type`
-  (`reminder|record|project|reference|idea`), `domain` (1+ tags from the
-  canonical list), `status` (project/reference only, default `active`),
-  `record_kind` (`structured|narrative` for records), `subtype`
-  (`entity|concept|procedure` for references), `file_ref` when a file is
+- **`type` is the v3 classification itself** — `reminder | record | project |
+  reference | idea` (v2's `log|reminder|log+reminder` is gone: a capture with
+  a due date splits into *two items* — a `record` for the event + a `reminder`
+  for the next due, per schema §3.1's habit model).
+- `domain`: 1+ tags from the canonical list at `~/wiki/_meta/tags.md` —
+  classify against it first; coin a new tag only when nothing fits, and add it
+  to the list in the same operation (a policy change → refinement log).
+- `status` (`active|superseded|archived`) — project/reference only, default
+  active. `record_kind: structured|narrative` — records only. `subtype:
+  entity|concept|procedure` — references only. `file_ref` when a file is
   involved (schema §12: stable location, never a reorganizable path).
 - Classification heuristics (schema §8): due-date language → `reminder`;
   dated/factual/no action → `record`; open question/decision → `project`;
   "how do I"/stable entity → `reference`; musing/quote → `idea`; decision-time
   analysis → `reference`/concept if worth rereading, else project support
   material; puzzle → `reference` with difficulty/subject as domain tags.
-  **Low confidence → `record`.** No `type: query/comparison/puzzle` exists —
-  the schema's §14 test decides their home.
-- **Domain tags come from the canonical list** at `~/wiki/_meta/tags.md`
-  (vault, git-synced). Classify against it first; coin a new tag only when
-  nothing fits, and add it to the list in the same operation. Coining a tag is
-  a policy change → log it to the refinement log.
+  **Low confidence → `record`.**
 
 Then route per the table (update `meta/tag-index.json` in the same operation,
 and commit `~/working-memory` after the batch):
 
-| `second_brain_type` | Destination | Mechanism |
+| `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | local `reminders.json` (+ Todoist mirror, §Todoist) | v2 format: `{id, due_at, message, raw_entry_id, status, origin}` |
+| `reminder` | local `reminders.json` (+ Todoist mirror) | v2 format: `{id, due_at, message, raw_entry_id, status, origin}`; set `mirrored: true` when the Todoist mirror succeeds |
 | `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py --root ~/working-memory add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
 | `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
-| `reference` | vault `entities/` (entity) or `concepts/` (concept, procedure) | `subtype` + `status: active` frontmatter |
+| `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (raw entry flag `todoist_only: true`, no vault note); substantial/multi-step → vault project note ONLY (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
 
 **Vault write discipline (all vault destinations):**
-- Frontmatter per schema: `type`, `domain`, `status` (where applicable),
-  `subtype` (references), `created`/`updated`, `source_url` where relevant.
+- v3 notes **ARE wiki pages**: add an index.md entry under the page's type
+  section + a log.md line; frontmatter per the vault SCHEMA; link related notes
+  when natural (no forced minimum).
+- Frontmatter: `type`, `domain`, `status` (where applicable), `subtype`
+  (references), `record_kind` (records), `created`/`updated`.
 - **Commit AND push in `~/wiki` after every write** — a local-only commit in a
   sync repo isn't backed up.
-- v3 notes are NOT wiki pages: do not add index.md/log.md entries, do not use
-  wiki SCHEMA types, do not force ≥2 wikilinks. Link related notes when
-  natural.
 - `records.py` is deterministic — for structured records ALWAYS use it (it
   handles JSON escaping and indexing); never hand-edit `records.db`.
 
-**Confirm** with ONE short line after each flush (v2 style): `✅ logged: …` /
-`✅ reminder set: …`. Include type when it clarifies (`✅ record (structured):
-BP 128/82`).
+**Confirm** with ONE short line after each flush — **showing the destination**:
+`✅ → Todoist: buy stamps` · `✅ → wiki (project): renew passport` ·
+`✅ record (SQLite): BP 128/82` · `✅ → wiki (concept): …`. If the user says
+"No, that should be a project note / a Todoist task", re-route on the spot.
 
 ## Retrieve (spec §12 — pick the store by what's asked)
 
 - **Reminder queries** ("what's due this week", "did I take it?") → local
   `reminders.json`, `status: pending`, soonest-first. "Did it get done" →
-  cross-check completion in Todoist (stage 3). Manual Todoist tasks → answer
-  from Todoist.
+  cross-check completion in Todoist. Manual Todoist tasks → answer from Todoist.
 - **Structured records** ("when did I last buy X", "BP last month") →
   `records.py query --domain … --entity … --since … --until …`; answer
   conversationally. Prescription overlap → pull rows, diff `data_json` in
   reasoning.
+- **Undated tasks** ("what errands are pending") → Todoist for `todoist_only`
+  items, vault `projects/` for project notes.
 - **Vault content** (project/reference/idea/narrative record) → search vault
   by title/backlink/domain tag. Exclude `status: archived|superseded` from
   default answers (surface if explicitly asked).
-- **Fallback / everything else** → raw log ground truth: `tag-index.json` →
-  current month raw → `raw/archive/`. Never make the user guess a tag or type.
+- **Fallback / everything else** → raw log: `tag-index.json` → current month
+  raw → `raw/archive/`. Never make the user guess a tag or type.
 
 ## Command (run immediately)
 
 - Mis-filed → re-route to the correct store (fix the SQLite row / vault note /
-  Todoist task) AND correct the raw entry's classification fields.
+  Todoist task / raw classification fields).
 - Merge/split vault notes → regenerate the named notes from raw.
 - Forget X → **confirm first** (the one destructive action), then strike the
   raw entry AND deprecate/remove derived artifacts (vault note, rows, task).
@@ -144,28 +149,34 @@ BP 128/82`).
 
 ## Reminders (v3 — local first, Todoist mirrors)
 
-- **Local `reminders.json` is the firing source of truth** — same cron
-  (`reminder-check.py`), same origin/home-channel delivery, overdue-pending
-  fires after downtime. If Todoist is absent or down, reminders work unchanged.
-- **Todoist (stage 3, config-gated):** mirror every new reminder there
-  (best-effort, retried at next reconciliation). Todoist provides cross-device
-  visibility + notifications, never gates firing. Completion: user checks off
-  in Todoist → reconciliation marks the matching local entry `done` (runs in
-  the reminder-check pass, not the digest — digest is out of scope).
-- Write local first, then mirror. Drift: Todoist wins for done-ness, local
-  wins for firing.
+- **Local `reminders.json` is the firing fallback and durable record** — the
+  cron (`reminder-check.py`) fires only entries WITHOUT a successful mirror.
+- **Todoist (stage 3, config-gated):** every new reminder mirrors there
+  (best-effort). `mirrored: true` → **local firing is skipped** — Todoist's
+  notification IS the reminder; local fires only when the mirror is absent or
+  failed (Todoist down, token missing, degraded). One notification, from the
+  healthy layer.
+- Completion: user checks off in Todoist → reconciliation marks the matching
+  local entry `done` (runs in the reminder-check pass, not the digest — digest
+  is out of scope).
 
 ## Refinement loop
 
 Append to `meta/refinement-log.md` (never rewrite) on repeated corrections,
 recurring `unfiled` fallbacks, missed retrievals, or rules that don't fit.
+Entries carry `STATUS: PENDING APPROVAL` or `STATUS: INFO`. Categories include
+`POLICY` (classification/routing/tag rules) and **`CODE IMPROVEMENT`**
+(proposals for the deterministic layer, with before/after + why).
 Approval boundary:
 - **Auto-tune:** numeric thresholds already flagged tunable — apply, log why.
-- **Sign-off required:** classification rules, routing rules, edits to the
-  canonical domain-tag list, and any SKILL.md policy change — present a
-  before/after diff and WAIT.
-- **Never self-patch:** deterministic code (capture gate, `records.py`,
-  `reminder-check.py`) — flag it, don't edit unsupervised.
+- **Sign-off required:** policy changes (classification rules, routing rules,
+  canonical-tag edits, SKILL.md) — present a before/after diff and WAIT.
+- **Sanctioned code flow (your approval):** on approval of a `CODE
+  IMPROVEMENT` entry, implement on the `v3.0.0` branch — spec + skill + code
+  together (docs describe the actual system), run the records.py round-trip
+  test, commit + push. Nothing goes live without your go.
+- **Never self-patch:** deterministic code outside that sanctioned flow —
+  flag it, don't edit unsupervised.
 
 ## Failure handling
 

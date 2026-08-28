@@ -154,12 +154,17 @@ Prescription-overlap checks: pull the last two `prescription` rows, hand both `d
 
 | Type | Store | Why |
 |---|---|---|
-| Reminder | Todoist | Cloud REST API + webhooks, reachable directly from the VPS — Hermes can both write tasks and read completion state, which Calendar-alone can't provide (see migration note below) |
+| Reminder | Todoist (visible layer) + local `reminders.json` (firing fallback) | Todoist: cross-device visibility + notifications. Local store: durable record + fires when the mirror is absent/failed (§9 of the spec) |
 | Record (structured) | SQLite (see §9) | Queryable by date/entity for trends and lookups |
-| Record (narrative) | Obsidian, dated notes | Full-text search, daily-note browsing |
-| Project | Obsidian, `status:` field | Search + a "status:active" dashboard query |
-| Reference | Obsidian, `status:` field, Entity/Concept/Procedure sub-type | Search by name/title, backlinks |
-| Idea/Quote | Obsidian | Backlinks, graph view, serendipitous resurfacing |
+| Record (narrative) | Obsidian, `records/` dated notes | Full-text search, daily-note browsing |
+| Project | Obsidian, `projects/`, `status:` field | Search + a "status:active" dashboard query |
+| Reference | Obsidian, `references/{entities,concepts,procedures}/` by subtype, `status:` field | Search by name/title, backlinks |
+| Idea/Quote | Obsidian, `ideas/` | Backlinks, graph view, serendipitous resurfacing |
+
+**Vault layout (6a, decided 2026-08-28):** type = top-level section
+(`references/`, `records/`, `projects/`, `ideas/`); Reference subtypes =
+subfolders (`entities/`, `concepts/`, `procedures/`). The canonical domain-tag
+list lives at `_meta/tags.md` in the vault.
 
 **Migration note — Things 3 + Google Calendar → Todoist.** The original split (Hermes writes to Calendar, Things 3 stays manual) works but has a real gap: Calendar events have no completion state, so Hermes can tell you *when* something's due but never *whether it got done* — which is exactly what the surfacing/nagging layer (§11) needs to answer "are we done with X yet." Todoist fixes this cleanly: it has a mature, well-documented REST API plus webhooks, reachable directly from the VPS with no local bridge, and it natively supports due dates/recurrence *and* completion state *and* projects/sections (a reasonable mirror of Things 3's Projects/Areas). Recommendation: **consolidate the actionable/checkable layer into Todoist** — Hermes reads and writes it directly — and let Google Calendar become, at most, a passive read-only mirror (Todoist can export a calendar feed) if you still want a visual day view. This removes the Things-3-vs-Calendar dance entirely rather than managing around it. TickTick was also considered — it has more built-in tools (habit tracking, Pomodoro, calendar view) but a comparatively less mature/developer-friendly API and weaker natural-language parsing, so it's the weaker fit for Hermes-driven automation specifically.
 
