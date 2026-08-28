@@ -92,7 +92,7 @@ def main():
     s.add_argument("--project", default=None, help="project name (default: TODOIST_PROJECT or 'Hermes')")
 
     l = sub.add_parser("list")
-    l.add_argument("--project", default=None)
+    l.add_argument("--project", default=None, help="filter to one project (default: all projects)")
 
     c = sub.add_parser("close")
     c.add_argument("--id", required=True)
@@ -121,17 +121,18 @@ def main():
         print(json.dumps({"id": task["id"], "content": task["content"],
                           "due": task.get("due"), "completed_at": task.get("completed_at")}))
     elif args.cmd == "list":
-        pid = project_id(args.project or default_project)
-        if not pid:
-            print("[]")
-            return
+        projects = {p["id"]: p["name"] for p in _projects()}
         tasks = (_req("GET", "tasks") or {}).get("results", [])
-        for t in sorted(
-            (x for x in tasks if x.get("project_id") == pid),
-            key=lambda x: (x.get("due") or {}).get("datetime") or "",
-        ):
+        if args.project:
+            pid = project_id(args.project)
+            if not pid:
+                print("[]")
+                return
+            tasks = [t for t in tasks if t.get("project_id") == pid]
+        for t in sorted(tasks, key=lambda x: (x.get("due") or {}).get("date") or ""):
             print(json.dumps({
                 "id": t["id"], "content": t["content"],
+                "project": projects.get(t.get("project_id")),
                 "completed_at": t.get("completed_at"),
                 "due": (t.get("due") or {}).get("date"),
             }))

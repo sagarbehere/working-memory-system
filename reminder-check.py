@@ -118,7 +118,7 @@ def _send(token, chat_id, thread_id, text, retries=3):
     return False, last_err
 
 
-def _git_commit(wm_root, fired, failed, mirrored=()):
+def _git_commit(wm_root, fired, failed, mirrored=(), reconciled=()):
     try:
         subprocess.run(
             ["git", "-C", str(wm_root), "add", "-A"],
@@ -127,7 +127,7 @@ def _git_commit(wm_root, fired, failed, mirrored=()):
         subprocess.run(
             [
                 "git", "-C", str(wm_root), "commit", "-q",
-                "-m", f"reminders: fired {len(fired)}, failed {len(failed)}, mirrored {len(mirrored)}",
+                "-m", f"reminders: fired {len(fired)}, failed {len(failed)}, mirrored {len(mirrored)}, reconciled {len(reconciled)}",
             ],
             check=False, capture_output=True,
         )
@@ -265,7 +265,7 @@ def main():
         with reminders_path.open(encoding="utf-8") as fh:
             reminders = json.load(fh)
 
-        fired, failed, fell_back_log, mirrored = [], [], [], []
+        fired, failed, fell_back_log, mirrored, reconciled = [], [], [], [], []
 
         if mirror_enabled:
             # v3 §9: mirror unmirrored pending reminders into Todoist, and
@@ -287,6 +287,7 @@ def main():
                 if _todoist_completed(todoist_token, r["todoist_id"], wm_root, r.get("id")):
                     r["status"] = "done"
                     r["completed_at"] = _dt.datetime.now().astimezone().isoformat()
+                    reconciled.append(r.get("id"))
                     _log(wm_root, "todoist-mirror", "reconcile", "done",
                          reminder_id=r.get("id"), todoist_id=r["todoist_id"])
 
@@ -355,17 +356,17 @@ def main():
                     origin=r.get("origin") or "legacy-lane",
                 )
 
-        if fired or failed or mirrored:
+        if fired or failed or mirrored or reconciled:
             tmp = reminders_path.with_name("reminders.json.tmp")
             tmp.write_text(json.dumps(reminders, indent=2), encoding="utf-8")
             tmp.replace(reminders_path)
-            _git_commit(wm_root, fired, failed, mirrored)
+            _git_commit(wm_root, fired, failed, mirrored, reconciled)
 
         pending = sum(1 for r in reminders if r.get("status") == "pending")
         print(
             f"reminder-check: mode={'telegram' if telegram_mode else 'stdout'} "
             f"fired={len(fired)} failed={len(failed)} "
-            f"fallback={len(fell_back_log)} pending={pending} mirrored={len(mirrored)}",
+            f"fallback={len(fell_back_log)} pending={pending} mirrored={len(mirrored)} reconciled={len(reconciled)}",
             file=sys.stderr, flush=True,
         )
         return 0
