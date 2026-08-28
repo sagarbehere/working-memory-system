@@ -2,21 +2,24 @@
 
 A capture-anywhere second brain on top of [Hermes Agent](https://hermes-agent.nousresearch.com): dump a thought in plain language from any chat, and the agent files it, organizes it, retrieves it later, and reminds you on schedule. No folders, no categories, no notes app to maintain — organizing is the system's job.
 
-**The pipeline:** every capture flows `capture → classify → record + route` — the extraction pass assigns type + tags in one step, the entry lands in the append-only raw log (ground truth, never edited; nothing routes before it exists), and the same classification routes it to a store.
+**How it works**
+
+1. **Capture** — blurt a thought into any chat: prefix it with *"Hey memory"* (or *"note"*), or use a chat you've reserved for memory.
+2. **Classify** — the agent reads what you sent, splits it into separate thoughts if needed, and labels each one with its kind — a reminder, a dated fact, a project, a reference, or an idea — plus tags saying what it's about.
+3. **Store** — each thought is put where its kind belongs: structured facts (health measurements, purchases, prescriptions) → the records database; dated notes, projects, references, and ideas → the wiki (your vault); reminders → the reminder store — optionally mirrored to Todoist so they notify on every device. Without Todoist, everything still works locally.
+4. **Ask** — *"when did I last buy vitamins?"*, *"what's due this week?"* — the agent answers from wherever the thought was stored.
 
 **Classify** is the one opinionated step. Each capture gets exactly one type, chosen by retrieval shape and lifecycle — not by topic:
 
 | Type | What it is |
 |---|---|
 | `reminder` | has a due date; surfaces itself when due |
-| `record` | a dated fact — **structured** (health reading, purchase → SQLite) or **narrative** (journal → the vault); queried by date/entity |
+| `record` | a dated fact — **structured** (health measurement, purchase → SQLite) or **narrative** (journal → the vault); queried by date/entity |
 | `project` | an open thread that ends in a decision or completion |
 | `reference` | evergreen knowledge (subtypes: entity · concept · procedure) |
 | `idea` | an atemporal musing, freely linked |
 
 Topic is carried by **flat tags, never folders** — folders mirror the types, tags carry the subject (a curry recipe gets `cooking, curry, indian`, not a Food folder). The types are deliberately few and extend only for a genuinely new retrieval shape (see [`second-brain-schema.md`](second-brain-schema.md)).
-
-**Store** routes by type: structured records → SQLite; projects, references, and ideas → the Obsidian vault (or any markdown wiki); reminders → the local store, with an **optional Todoist mirror** for cross-device visibility and notifications — without a Todoist token, everything still works locally.
 
 It is, at heart, a searchable copy of the parts of your memory you choose to write down — you talk, it organizes, and it learns from corrections.
 
