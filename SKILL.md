@@ -175,6 +175,12 @@ recurring `unfiled` fallbacks, missed retrievals, or rules that don't fit.
 Entries carry `STATUS: PENDING APPROVAL` or `STATUS: INFO`. Categories include
 `POLICY` (classification/routing/tag rules) and **`CODE IMPROVEMENT`**
 (proposals for the deterministic layer, with before/after + why).
+- **Role (2026-08-29):** the log is a *decision record + async mailbox*,
+  not the decision channel — rulings happen in conversation (agent presents
+  a before/after and WAITs), the log records outcomes; `PENDING APPROVAL`
+  entries are the mailbox the nightly gate surfaces for decisions not
+  settled in chat. File-change history lives in git; the log carries the
+  decisions git can't.
 Approval boundary:
 - **Auto-tune:** numeric thresholds already flagged tunable — apply, log why.
 - **Sign-off required:** policy changes (classification rules, routing rules,
