@@ -1,160 +1,184 @@
 ---
 name: working-memory
-description: "Use for the working-memory system: when the user sends capture, retrieval-question, or filing-correction messages in a reserved working-memory chat or starting with the markers 'Hey memory'/'note', and for the nightly consolidation pass. Implements the working-memory system: split/tag buffered text, file captures to the raw log, promote topics, manage reminders, answer retrieval questions from stored notes."
-version: 2.0.0
+description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'/'note'. Classify each capture (reminder/record/project/reference/idea), route to SQLite/vault/Todoist, retrieve from all stores, manage reminders."
+version: 3.0.0
 author: Sagar Behere
 license: MIT
 metadata:
   hermes:
-    tags: [memory, capture, retrieval, reminders, telegram]
+    tags: [memory, second-brain, capture, retrieval, reminders]
     related_skills: [hermes-agent]
 ---
 
-# Working Memory
+# Working Memory v3 (Second Brain)
 
-Personal working-memory system: the user captures thoughts via Telegram in a **dedicated chat** (spec Section 2); you do all filing, retrieval, reminders, and cleanup. Raw log is ground truth; topic files are derived caches; everything is reversible.
+Personal second-brain system: the user captures thoughts via any connected
+client; you classify, file, retrieve, and remind. **Raw log is ground truth**
+(`~/working-memory/raw/`) — every capture is written there first, then routed
+to its store. Everything derived (vault notes, SQLite rows, Todoist tasks) is
+regenerable or correctable; nothing is silently lost.
 
-**Scope guard (v2, spec Section 18):** working-memory input is any message that (a) arrives in a **reserved lane** — a chat previously reserved in-band with "reserve for memory", recorded in `meta/lanes.json`, or the legacy env-declared lane (`WM_TELEGRAM_CHAT_ID`/`THREAD_ID` in `~/.hermes/working-memory.env`) — or (b) starts with a **marker**: `Hey memory` or `note` (case-insensitive, word boundary). The capture-gate hook has already buffered and skill-stamped the message, and it deliberately leaves the marker visible so you can route on it — **strip the marker token before filing** (Capture below). Everything else is NOT working-memory input — answer as a normal assistant and file nothing.
+**Read before operating:** `second-brain-schema.md` (type/tag/status model —
+read this first), `second-brain-implementation-guide.md` (routing/backup
+rationale), `working-memory-system-spec-v3.md` (capture plumbing), then
+`logs/` (what actually happened). Same three-tier escalation as v2, extended.
 
-**Lane identity = chat + thread, not session.** The lane is the topic identified by `WM_TELEGRAM_CHAT_ID` + `WM_TELEGRAM_THREAD_ID` (the "Working Memory" topic inside the bot DM). It is independent of which Hermes session is currently bound to that topic: `/new` (fresh session, same topic) and compression-driven session rotation (old session sealed `compression`, child session continues) do NOT disconnect the lane — the debounce hook and the `dm_topics` skill binding key on chat+thread only, and all durable data lives in `$WM_ROOT` files, not in the conversation context. When explaining WM to the user: "lane" is a working-memory-system term, not Hermes vocabulary (topic = Telegram layer, session = Hermes layer). Full session model: see the `hermes-session-lifecycle` skill.
+## Scope guard (unchanged from v2)
 
-Read `~/.hermes/working-memory.env` before your first write — it defines `WM_ROOT` (storage root) and the tunable thresholds (`WM_PROMOTE_AFTER`, `WM_CONDENSE_SIZE`, `WM_RAW_RETENTION_DAYS`, `WM_CONFIRM`).
-
-Layout under `$WM_ROOT` (a git repo — commit after every write batch):
-
-- `raw/YYYY-MM.md` — append-only raw entries; never edit; rotate files older than `WM_RAW_RETENTION_DAYS` into `raw/archive/` during consolidation.
-- `topics/<tag>.md` — derived, regenerable.
-- `meta/tag-index.json` — tag → list of raw entry ids + occurrence counts.
-- `meta/pending-buffer.json` — unflushed capture buffer, managed by the debounce hook; read it if useful, don't hand-edit.
-- `meta/refinement-log.md` — curated patterns worth reviewing (spec Section 17); append, don't rewrite.
-- `logs/YYYY-MM.log` — operational trail (spec Section 11): JSON lines about what the system DID. Diagnostic, not memory — delete files older than ~30 days during consolidation.
-- `reminders.json` — pending reminders (structured, not markdown).
+Working-memory input is any message that (a) arrives in a **reserved lane**
+(`meta/lanes.json`, or the legacy env lane), or (b) starts with a marker:
+`Hey memory` or `note` (case-insensitive, word boundary). The capture-gate
+hook already buffered and stamped it; **strip the marker token before filing**.
+Everything else is ordinary conversation — answer normally, file nothing.
 
 ## Every incoming message: route it
 
-0. **Reservation phrases** — if the message is "reserve for memory" or "release for memory" (the capture-gate hook has already updated `meta/lanes.json`): reply with a one-line confirmation ("✅ Reserved for memory — this chat is now a working-memory lane; no markers needed. Undo with 'release for memory'." or the release equivalent) and file NOTHING. If the phrase arrived but `meta/lanes.json` does not reflect it (edge case), follow spec Section 18.3 and record it yourself, then confirm.
-1. Split the text into items — **conservative**: one coherent thought = one item even if it touches multiple tags; split only genuinely unrelated content.
-2. Classify each item: `capture` (remember), `question` (retrieve now), `command` (filing/admin instruction).
-3. Capture → **Capture**. Question → **Retrieve**. Command → **Command**.
-4. Ordinary chit-chat unrelated to memory → answer normally, file nothing.
+1. Reservation phrases (`reserve for memory` / `release for memory`) — the
+   hook has updated `meta/lanes.json`; confirm in one line, file nothing.
+2. Split into items — conservative: one coherent thought = one item.
+3. Classify each item: `capture` / `question` / `command`.
+4. Capture → **Capture & classify** below. Question → **Retrieve**. Command →
+   **Command**.
+5. Chit-chat → answer normally.
 
-## Capture
+## Capture: raw entry first, then classify & route
 
-If the item text still starts with a marker token (`note` / `Hey memory`, or
-the short/long reservation forms), **strip it before writing the raw entry**
-— the hook leaves it in the text deliberately for routing; it must not appear
-in the entry or the tags.
-
-Write one raw entry per capture item:
-
-- **Dedup first**: before writing, check the current month's `raw/YYYY-MM.md` (and peek at `meta/pending-buffer.json`) for a verbatim or near-identical recent entry. If the fact is already stored (re-send, duplicate delivery, user repeating themselves), do NOT write a second entry — just confirm to the user it's already on file, and offer to log a follow-up update if they've moved past it. A duplicate capture is log pollution, not safety.
+**Write the raw entry BEFORE anything else** — append-only, never edited:
 
 ```
-## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
+## 2026-08-28T16:03:00+05:30 [id: 20260828-1603-01]
 tags: health, vitamin-d
 type: log+reminder
+second_brain_type: reminder
+domain: health, vitamin-d
 supersedes: 20260817-1610-01
 
 <text>
 ---
 ```
 
-- id = deterministic timestamp (`YYYYMMDD-HHMM-SS`); suffix `-01`, `-02`… when one flush yields several entries.
-- tags: 1–4 freeform keywords, lowercase. **REUSE** existing tags from `meta/tag-index.json` when they obviously match; coin a new tag only when nothing fits.
-- type: `log` (plain fact) | `reminder` (time component) | `log+reminder` (both).
-- `supersedes`: set only when this item clearly replaces a fact visible in an existing topic file or a recent raw entry.
-- Update `meta/tag-index.json` in the **same operation** as the append (append entry id, bump count) — never as a separate async step.
-- **Promotion**: when a tag's count reaches `WM_PROMOTE_AFTER` (default 2), create `topics/<tag>.md` backfilled from every raw entry carrying that tag. A deduplicated re-send does NOT increment a tag's occurrence count — promotion counts only distinct captures (approved policy, 2026-08-24).
-- **Size trigger**: if the topic file you'd append to exceeds `WM_CONDENSE_SIZE` (default 2500 bytes), rewrite it condensed instead of appending (see **Consolidation**).
-- **Reminders** (type `reminder`/`log+reminder`): add `{"id", "due_at", "message", "raw_entry_id", "status": "pending"}` to `reminders.json`. `due_at` = ISO-8601 with local offset (e.g. `2026-08-31T10:00:00+05:30`); `message` = the text to send at that time — delivered verbatim at fire time, so phrase it relative to fire time (e.g. "Comet Service pickup guy will arrive today."), not capture time ("…tomorrow at 8 am"). **`origin`** (optional, spec Section 18.4) = `{"platform": "<source platform>", "chat_id": "<chat>", "thread_id": "<thread or ''>"}` — record it when the capture came from a non-lane chat (e.g. a marker message from the web UI or another Telegram topic) so the reminder delivers back to the chat where it was captured; omit for reserved-lane captures (the legacy lane is the default target). If unsure about the schema, read `reminder-check.py` — it fires exactly when `status == "pending"` and `due_at <= now`, delivering to origin with a home-channel fallback.
-- `git add -A && git commit -m "capture: <short summary>"` after the write batch.
-- **Confirm** with ONE short line (skip entirely when `WM_CONFIRM=0`). Never
-  include ids, tags, file paths, commit hashes, or internal operational
-  details — the user doesn't want the machinery. Examples:
-  `✅ logged: printer` · `✅ logged 2: printer update, comet-service reminder (Tue 8:00 AM)` ·
-  `✅ reminder set: dentist Tue 8:00 AM`. For retrieval questions, just answer.
+- id = deterministic timestamp; `-01`, `-02`… per flush. Dedup first (check
+  current month raw + pending buffer; a duplicate re-send is NOT re-filed).
+- `type` stays `log` / `reminder` / `log+reminder` (v2 field).
+- **v3 fields** (classification per schema §7/§8): `second_brain_type`
+  (`reminder|record|project|reference|idea`), `domain` (1+ tags from the
+  canonical list), `status` (project/reference only, default `active`),
+  `record_kind` (`structured|narrative` for records), `subtype`
+  (`entity|concept|procedure` for references), `file_ref` when a file is
+  involved (schema §12: stable location, never a reorganizable path).
+- Classification heuristics (schema §8): due-date language → `reminder`;
+  dated/factual/no action → `record`; open question/decision → `project`;
+  "how do I"/stable entity → `reference`; musing/quote → `idea`; decision-time
+  analysis → `reference`/concept if worth rereading, else project support
+  material; puzzle → `reference` with difficulty/subject as domain tags.
+  **Low confidence → `record`.** No `type: query/comparison/puzzle` exists —
+  the schema's §14 test decides their home.
+- **Domain tags come from the canonical list** at `~/wiki/_meta/tags.md`
+  (vault, git-synced). Classify against it first; coin a new tag only when
+  nothing fits, and add it to the list in the same operation. Coining a tag is
+  a policy change → log it to the refinement log.
 
-## Retrieve
+Then route per the table (update `meta/tag-index.json` in the same operation,
+and commit `~/working-memory` after the batch):
 
-- **Reminder questions** ("what's due this week", "show my reminders", "any reminders for printer?") → read `reminders.json`, filter `status == pending` (by date range / keyword against `message` if the query narrows), sort soonest-first. Never answer from topic files — a topic line can be terse, stale, or already removed once fired.
-- **Fact questions** → 1) match `tag-index.json` / topic file names (fast path — most queries resolve from a single topic file), 2) search tag-index more broadly, 3) fall back to the current month's raw log, then `raw/archive/`. Answer conversationally; never make the user guess a tag name.
-- **Proposal queue** — if the user asks "any proposals awaiting approval?" / "any policy proposals?" (or similar), read `meta/refinement-log.md` and present ONLY entries marked `STATUS: PENDING APPROVAL` (drafted policy changes, flagged code gaps, or open questions needing a decision), each with its before/after diff or the specific question. Collect the user's decision; only after approval may drafted policy changes be applied (per the Refinement loop section). Entries marked `STATUS: INFO` are informational and are NOT presented as pending.
+| `second_brain_type` | Destination | Mechanism |
+|---|---|---|
+| `reminder` | local `reminders.json` (+ Todoist mirror, §Todoist) | v2 format: `{id, due_at, message, raw_entry_id, status, origin}` |
+| `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py --root ~/working-memory add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
+| `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
+| `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
+| `reference` | vault `entities/` (entity) or `concepts/` (concept, procedure) | `subtype` + `status: active` frontmatter |
+| `idea` | vault `ideas/` atomic note | freely linked, no status |
 
-## Command (run immediately — don't wait for consolidation)
+**Vault write discipline (all vault destinations):**
+- Frontmatter per schema: `type`, `domain`, `status` (where applicable),
+  `subtype` (references), `created`/`updated`, `source_url` where relevant.
+- **Commit AND push in `~/wiki` after every write** — a local-only commit in a
+  sync repo isn't backed up.
+- v3 notes are NOT wiki pages: do not add index.md/log.md entries, do not use
+  wiki SCHEMA types, do not force ≥2 wikilinks. Link related notes when
+  natural.
+- `records.py` is deterministic — for structured records ALWAYS use it (it
+  handles JSON escaping and indexing); never hand-edit `records.db`.
 
-- Mis-filed → re-tag / re-file the referenced raw entry, regenerate the affected topic file(s).
-- Merge/split topics → regenerate the named topic files per instruction.
-- Forget X → **confirm with the user first** (the one destructive action), then strike the fact from the topic file AND the raw entry's content.
-- Ambiguous target → ask for clarification, never guess.
+**Confirm** with ONE short line after each flush (v2 style): `✅ logged: …` /
+`✅ reminder set: …`. Include type when it clarifies (`✅ record (structured):
+BP 128/82`).
 
-## Topic file format
+## Retrieve (spec §12 — pick the store by what's asked)
 
-```
----
-tag: vitamin-d
-last_updated: 2026-08-24
----
+- **Reminder queries** ("what's due this week", "did I take it?") → local
+  `reminders.json`, `status: pending`, soonest-first. "Did it get done" →
+  cross-check completion in Todoist (stage 3). Manual Todoist tasks → answer
+  from Todoist.
+- **Structured records** ("when did I last buy X", "BP last month") →
+  `records.py query --domain … --entity … --since … --until …`; answer
+  conversationally. Prescription overlap → pull rows, diff `data_json` in
+  reasoning.
+- **Vault content** (project/reference/idea/narrative record) → search vault
+  by title/backlink/domain tag. Exclude `status: archived|superseded` from
+  default answers (surface if explicitly asked).
+- **Fallback / everything else** → raw log ground truth: `tag-index.json` →
+  current month raw → `raw/archive/`. Never make the user guess a tag or type.
 
-- Took vitamin D pill 2026-08-17, due again 2026-08-24 (reminder set).
-- Weekly cadence, consistent since mid-August.
-```
+## Command (run immediately)
 
-## Logging (operational trail — spec Section 11)
+- Mis-filed → re-route to the correct store (fix the SQLite row / vault note /
+  Todoist task) AND correct the raw entry's classification fields.
+- Merge/split vault notes → regenerate the named notes from raw.
+- Forget X → **confirm first** (the one destructive action), then strike the
+  raw entry AND deprecate/remove derived artifacts (vault note, rows, task).
+- Ambiguous target → ask, never guess.
 
-After each extraction pass, append one JSON line to `logs/YYYY-MM.log`:
+## Consolidation (v3, nightly job + size triggers)
 
-- extraction: `{"ts", "component": "extraction-pass", "event": "extraction", "outcome": "success"|"retry"|"unfiled-fallback", "items": <count>, "captures": <n>, "questions": <n>, "commands": <n>}`
-- command executed: `{"ts", "component": "extraction-pass", "event": "command", "outcome": "executed", "description": "<what you did>"}`
-- consolidation run: `{"ts", "component": "consolidation", "event": "consolidation", "outcome": "done", "topics": <n>, "rotated_raw": <n>, "deleted_logs": <n>}`
+- Reference-flavored vault notes: condense like v2 topic files (derived,
+  regenerable).
+- **Structured records in SQLite are never collapsed** — itemized history.
+- Supersession: newer replaces older; `status: superseded` suppresses from
+  defaults.
+- Expiry: resolved reminders / time-bound lines drop from derived notes; raw
+  untouched. Rotate raw >60-90d to `raw/archive/`; delete `logs/` >30d.
+- The nightly gate (`wm-consolidation-gate.py`) prints a digest only when
+  there's work; a silent night is normal.
 
-Routine successful captures do NOT need their own log line — the raw entry already records the content; logs record the operational layer. Log failures loudly (retry → fallback → any error). Keep lines terse JSON, one per line, append-only.
+## Reminders (v3 — local first, Todoist mirrors)
 
-## Consolidation (nightly job + size triggers)
+- **Local `reminders.json` is the firing source of truth** — same cron
+  (`reminder-check.py`), same origin/home-channel delivery, overdue-pending
+  fires after downtime. If Todoist is absent or down, reminders work unchanged.
+- **Todoist (stage 3, config-gated):** mirror every new reminder there
+  (best-effort, retried at next reconciliation). Todoist provides cross-device
+  visibility + notifications, never gates firing. Completion: user checks off
+  in Todoist → reconciliation marks the matching local entry `done` (runs in
+  the reminder-check pass, not the digest — digest is out of scope).
+- Write local first, then mirror. Drift: Todoist wins for done-ness, local
+  wins for firing.
 
-**Nightly cron is gated (since 2026-08-24):** the consolidation job (registered per-install in Hermes' cron store, schedule `30 2 * * *`) runs `~/.hermes/scripts/wm-consolidation-gate.py` as its context script. The gate prints a work-digest only when there IS work — new raw entries since the last logged consolidation, topics over `WM_CONDENSE_SIZE`, raw files due for rotation, logs due for deletion, or `STATUS: PENDING APPROVAL` entries. Empty stdout → scheduler skips the AI call entirely: no session, no tokens, no delivery. **A silent night is normal, not a failed run** — don't tell the user the job broke. When the gate emits, its digest is injected as context; run the pass below on that work. Gate reads `last_consolidation_ts` from `logs/YYYY-MM.log` lines with `component == "consolidation"`, so the consolidation log line stays load-bearing.
+## Refinement loop
 
-**Script install convention (2026-08-25):** `wm-consolidation-gate.py` and `cron-session-prune.py` in `~/.hermes/scripts/` are **copies, not symlinks** — Hermes' cron scheduler refuses to execute scripts that resolve outside `~/.hermes/`, so a symlink into the package dir silently fails. `setup.sh` installs them with `rm -f` + `install -m 755` (replacing any old symlink), so after editing the scripts in the package repo, re-run `./setup.sh` to refresh the copies; do NOT re-symlink them.
-
-- Collapse recurring log entries into a rolling summary ("vitamin D weekly, last taken Aug 24", not one line per occurrence).
-- Apply `supersedes`: newer fact replaces the older line rather than appending alongside it.
-- Split an overgrown topic into more specific ones, or merge overlapping ones, when useful — safe, because the raw log is unaffected.
-- Drop lines whose purpose has expired (resolved reminders, "due in a week" style facts); reconcile fired reminders into topic lines ("fired Aug 24, next due Aug 31" or remove).
-- Rotate raw files older than `WM_RAW_RETENTION_DAYS` into `raw/archive/`; **delete** `logs/` files older than ~30 days (diagnostic, not memory).
-- Review `meta/refinement-log.md` and apply the refinement policy below.
-- Rewrite topic files; bump `last_updated`; raw log untouched; commit.
-
-## Refinement loop (spec Section 17)
-
-Append a dated entry to `meta/refinement-log.md` (never rewrite it) when you notice:
-- the user issues the same kind of `command` correction more than once for similar situations — a repeated correction signals the rule, not one instance, is off;
-- extraction repeatedly falls back to `unfiled` for a recognizable category of input;
-- a retrieval question misses something that was actually captured (user re-asks differently, or says "I did tell you about X");
-- during consolidation, a SKILL.md rule doesn't fit a case you just handled.
-
-Every entry carries an explicit status line: `STATUS: PENDING APPROVAL` (needs a user decision) or `STATUS: INFO` (informational/resolved). Only PENDING APPROVAL entries are presented when the user asks about the proposal queue.
-
-Review the log on each consolidation pass (weekly-ish). **Approval boundary:**
-- **Low-risk auto-tune:** adjusting a numeric threshold already flagged as tunable (`WM_DEBOUNCE_SECONDS`, `WM_PROMOTE_AFTER`, `WM_CONDENSE_SIZE`) based on observed friction — apply it, update `~/.hermes/working-memory.env`, and log the change + reasoning.
-- **Needs sign-off:** changes to classification rules, tag policy, splitting/supersession heuristics, or command-handling logic in SKILL.md — present the proposed change as a before/after diff via Telegram and WAIT for confirmation before it takes effect. **You must NEVER write to SKILL.md yourself, even for small clarifications** — that is always the user's call, no matter how obviously good the edit seems.
-- **Never self-patch:** anything in the deterministic code (the debounce hook, `reminder-check.py`) — surface it as a flagged issue to the user; do not edit code unsupervised.
+Append to `meta/refinement-log.md` (never rewrite) on repeated corrections,
+recurring `unfiled` fallbacks, missed retrievals, or rules that don't fit.
+Approval boundary:
+- **Auto-tune:** numeric thresholds already flagged tunable — apply, log why.
+- **Sign-off required:** classification rules, routing rules, edits to the
+  canonical domain-tag list, and any SKILL.md policy change — present a
+  before/after diff and WAIT.
+- **Never self-patch:** deterministic code (capture gate, `records.py`,
+  `reminder-check.py`) — flag it, don't edit unsupervised.
 
 ## Failure handling
 
-- Extraction fails → retry once; still failing → write the raw text as a single untagged entry (tag: `unfiled`) — **never drop a capture**. Log the fallback.
-- Reminder delivery is `reminder-check.py`'s job (retries, marks fired, logs each attempt). If a topic line says "reminder set" but `reminders.json` has no pending entry, reconcile at consolidation.
-- If a Telegram reply fails to send, retry once; don't silently claim a capture was filed.
+- Extraction fails → retry once → single untagged `unfiled` raw entry, never
+  drop a capture; log the fallback.
+- A structured-record insert fails → log; keep the raw entry; retry at next
+  consolidation.
+- Telegram reply fails → retry once; don't claim success.
 
 ## Escalation
 
-If a request doesn't clearly fit the rules above, consult before improvising:
-- **Why** the system works this way → the full spec at
-  `working-memory-system-spec.md` in this package (e.g. why `command` items
-  never become raw entries, why reminders have their own retrieval path, why
-  markers + reserved lanes scope working-memory input — Section 18).
-- **v2 is IMPLEMENTED** (spec Section 18) → markers "Hey memory"/"note", in-chat reservation ("reserve this chat for working memory" → `meta/lanes.json`), origin-based reminder delivery. Honor them in live capture. Do NOT re-propose the rejected lane-registry design.
-- **How** it currently works → the implementation source in that package (the debounce hook `hooks/working-memory-debounce/handler.py`, `reminder-check.py`).
-- **What actually happened** on a past run → `$WM_ROOT/logs/YYYY-MM.log` (e.g. "why didn't my reminder fire yesterday" needs logs, not the spec or code — neither records runtime history).
-
-**Keeping the system updated:** when asked anything about how the working-memory system works (including odd or hypothetical questions), consult the spec, this skill, and the source BEFORE answering from memory. When you notice a gap, a repeated correction, or a case the rules don't fit, append a dated entry to `meta/refinement-log.md` (Refinement loop section above) — never rewrite it. Policy changes to SKILL.md always need the user's sign-off; changes to the deterministic code are flagged for the user, never self-made.
-
-SKILL.md is version-controlled in the package repo (git) — every accepted refinement is diffable and revertible.
+Not clearly covered? Consult in order: `second-brain-implementation-guide.md`
+(routing/backup decisions) → `second-brain-schema.md` (type/tag/status model)
+→ `working-memory-system-spec-v3.md` (plumbing rationale) → `logs/` (past
+runs). SKILL.md is git-versioned on the `v3.0.0` branch — every accepted
+refinement is diffable and revertible.
