@@ -10,11 +10,14 @@ Project + enable flags: TODOIST_PROJECT / TODOIST_MIRROR_ENABLED in
 Commands: ensure-project | create | list | close | delete | get
 """
 import argparse
+import datetime as _dt
 import json
 import os
 import pathlib
 import subprocess
 import sys
+from datetime import timezone
+from urllib.parse import quote
 
 API = "https://api.todoist.com/api/v1/"
 HOME = pathlib.Path.home()
@@ -97,6 +100,13 @@ def main():
     c = sub.add_parser("close")
     c.add_argument("--id", required=True)
 
+    co = sub.add_parser("completed")
+    co.add_argument("--since", required=True, help="start date YYYY-MM-DD")
+    co.add_argument("--until", required=True, help="end date YYYY-MM-DD")
+    co.add_argument("--by", default="completion", choices=["completion", "due"],
+                    help="group by completion date (default) or due date")
+    co.add_argument("--project", default=None, help="filter to one project")
+
     d = sub.add_parser("delete")
     d.add_argument("--id", required=True)
 
@@ -135,6 +145,40 @@ def main():
                 "project": projects.get(t.get("project_id")),
                 "completed_at": t.get("completed_at"),
                 "due": (t.get("due") or {}).get("date"),
+            }))
+    elif args.cmd == "completed":
+        projects = {p["id"]: p["name"] for p in _projects()}
+        # The API wants full ISO datetimes; date-only returns empty. Convert
+        # YYYY-MM-DD to local-timezone day bounds, expressed in UTC.
+        tz = _dt.datetime.now().astimezone().tzinfo
+        since_utc = _dt.datetime.fromisoformat(args.since).replace(tzinfo=tz).astimezone(timezone.utc).isoformat()
+        until_utc = (_dt.datetime.fromisoformat(args.until).replace(tzinfo=tz, hour=23, minute=59, second=59)
+                     .astimezone(timezone.utc).isoformat())
+        path = ("tasks/completed/by_completion_date" if args.by == "completion"
+                else "tasks/completed/by_due_date")
+        pid = None
+        if args.project:
+            pid = project_id(args.project)
+            if not pid:
+                print("[]")
+                return
+        items, cursor = [], None
+        for _ in range(5):  # bounded pagination
+            q = f"{path}?since={quote(since_utc)}&until={quote(until_utc)}&limit=100"
+            if pid:
+                q += f"&project_id={pid}"
+            if cursor:
+                q += f"&cursor={cursor}"
+            data = _req("GET", q) or {}
+            items += data.get("items", [])
+            cursor = data.get("next_cursor")
+            if not cursor:
+                break
+        for t in sorted(items, key=lambda x: x.get("completed_at") or x.get("completed_date") or ""):
+            print(json.dumps({
+                "id": t.get("id"), "content": t.get("content"),
+                "project": projects.get(t.get("project_id")),
+                "completed_at": t.get("completed_at") or t.get("completed_date"),
             }))
     elif args.cmd == "close":
         _req("POST", f"tasks/{args.id}/close")

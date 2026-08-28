@@ -114,6 +114,10 @@ and commit `~/working-memory` after the batch):
 - **Reminder queries** ("what's due this week", "did I take it?") → local
   `reminders.json`, `status: pending`, soonest-first. "Did it get done" →
   cross-check completion in Todoist. Manual Todoist tasks → answer from Todoist.
+- **Completion history** ("what did I finish last month", "did I get X done?")
+  → `todoist.py completed --since YYYY-MM-DD --until YYYY-MM-DD [--project NAME]`
+  (completion-date view; `--by due` for the due-date view). Answer
+  conversationally, grouped by project.
 - **Structured records** ("when did I last buy X", "BP last month") →
   `records.py query --domain … --entity … --since … --until …`; answer
   conversationally. Prescription overlap → pull rows, diff `data_json` in
