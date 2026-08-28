@@ -1,6 +1,22 @@
 # Working Memory System
 
-A personal working-memory system on top of [Hermes Agent](https://hermes-agent.nousresearch.com): capture a thought in plain language, and the agent files it, tags it, retrieves it later, and reminds you on schedule — no folder structures, no categorization effort, no "notes app" to maintain. The raw log is the immutable capture record; typed destinations (SQLite, the Obsidian vault, Todoist) hold the curated artifacts; **everything is reversible**.
+A capture-anywhere second brain on top of [Hermes Agent](https://hermes-agent.nousresearch.com): dump a thought in plain language from any chat, and the agent files it, organizes it, retrieves it later, and reminds you on schedule. No folders, no categories, no notes app to maintain — organizing is the system's job.
+
+**The pipeline:** every capture flows `capture → raw log (ground truth) → classify → store`. The raw log is append-only and immutable — a capture is never lost, and everything derived from it stays regenerable.
+
+**Classify** is the one opinionated step. Each capture gets exactly one type, chosen by retrieval shape and lifecycle — not by topic:
+
+| Type | What it is |
+|---|---|
+| `reminder` | has a due date; surfaces itself when due |
+| `record` | a dated fact (health reading, purchase); queried by date/entity |
+| `project` | an open thread that ends in a decision or completion |
+| `reference` | evergreen knowledge (subtypes: entity · concept · procedure) |
+| `idea` | an atemporal musing, freely linked |
+
+Topic is carried by flat tags, never folders; the types are deliberately few and extend only for a genuinely new retrieval shape (see [`second-brain-schema.md`](second-brain-schema.md)).
+
+**Store** routes by type: structured records → SQLite; projects, references, and ideas → the Obsidian vault (or any markdown wiki); reminders → the local store, with an **optional Todoist mirror** for cross-device visibility and notifications — without a Todoist token, everything still works locally.
 
 It is, at heart, a searchable copy of the parts of your memory you choose to write down — you talk, it organizes, and it learns from corrections.
 
