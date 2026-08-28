@@ -66,15 +66,18 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - wm-consolidation-gate.py  -> nightly consolidation gate (context
 #         script: empty output = no work = scheduler skips the AI call)
 #       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
+#       - wm-backup-push.py         -> nightly backup push to the private
+#         remote (watchdog: silent when healthy, alerts on failure)
 #       - records.py                -> v3 structured-records store CLI
 #       - todoist.py                -> v3 Todoist mirror helper
 mkdir -p "$HERMES_HOME/scripts"
-rm -f "$HERMES_HOME/scripts/wm-consolidation-gate.py" "$HERMES_HOME/scripts/cron-session-prune.py" "$HERMES_HOME/scripts/records.py" "$HERMES_HOME/scripts/todoist.py"
+rm -f "$HERMES_HOME/scripts/wm-consolidation-gate.py" "$HERMES_HOME/scripts/cron-session-prune.py" "$HERMES_HOME/scripts/wm-backup-push.py" "$HERMES_HOME/scripts/records.py" "$HERMES_HOME/scripts/todoist.py"
 install -m 755 "$PKG_DIR/wm-consolidation-gate.py" "$HERMES_HOME/scripts/wm-consolidation-gate.py"
 install -m 755 "$PKG_DIR/cron-session-prune.py" "$HERMES_HOME/scripts/cron-session-prune.py"
+install -m 755 "$PKG_DIR/wm-backup-push.py" "$HERMES_HOME/scripts/wm-backup-push.py"
 install -m 755 "$PKG_DIR/records.py" "$HERMES_HOME/scripts/records.py"
 install -m 755 "$PKG_DIR/todoist.py" "$HERMES_HOME/scripts/todoist.py"
-echo "Cron/helper scripts installed: $HERMES_HOME/scripts/wm-consolidation-gate.py, cron-session-prune.py, records.py, todoist.py (copies)"
+echo "Cron/helper scripts installed: $HERMES_HOME/scripts/wm-consolidation-gate.py, cron-session-prune.py, wm-backup-push.py, records.py, todoist.py (copies)"
 
 # 5. Runtime env (never overwrite user edits)
 if [ ! -f "$HERMES_HOME/working-memory.env" ]; then

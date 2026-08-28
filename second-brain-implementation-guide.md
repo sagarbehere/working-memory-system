@@ -51,21 +51,24 @@ Build-relevant notes below.
 
 **Todoist:** reasonably trusted infrastructure per your own assessment — lower backup priority, no action needed beyond the API integration itself.
 
-## 5. Backup consolidation — one "ops" repo, one cron job
+## 5. Backup — one private remote on the existing repo, one nightly cron
 
 Four systems exist in this design, and only one of them needs new backup infrastructure built for it — the other three are either already solved or must deliberately stay separate:
 
 - **Working-memory-system code repo** (public, on Reddit — v2.0.0 tagged and frozen there) — **never** put personal data here, even in history. Stays fully separate; this is a security boundary, not a fragmentation problem to solve.
 - **Obsidian vault** (private repo, synced via Working Copy) — already backed up as a side effect of normal use. Don't fold other data into it; it's a live sync target, not a cold-backup destination, and adding unrelated binary snapshots would only bloat it. Confirm the LLM Wiki skill commits *and pushes* after each write — a local-only commit isn't actually backed up.
-- **Todoist** — SaaS-hosted, low priority per your own assessment. No dedicated backup infra needed, but see the optional export below since it's nearly free once the ops repo exists.
-- **SQLite + residual `/working-memory/` folder** (raw log, `meta/`, `logs/`) — **neither has a backup mechanism today.** This is the one real gap, and both close together with a single new private "second-brain-ops" repo and one cron job:
+- **Todoist** — SaaS-hosted, low priority per your own assessment. No dedicated backup infra needed, but see the optional export below since it's nearly free once the push cron exists.
+- **SQLite + residual `/working-memory/` folder** (raw log, `meta/`, `logs/`) — the folder is already a git repo (the capture pipeline auto-commits; on-box audit trail), but it has **no remote: a repo on the VPS's own disk is not a backup.** The one real gap closes by giving the existing repo a private remote and one nightly cron that pushes it:
 
-1. Nightly cron: `sqlite3 records.db ".backup /path/to/backup/records-$(date +%F).db"` (the `.backup` command is safe against concurrent writes, unlike a raw copy).
-2. Same cron run: `git add -A && git commit && git push` over `/working-memory/` and the SQLite backup file, both into the ops repo.
-3. Optional, same run: export Todoist tasks to JSON, commit alongside — costs almost nothing once the job exists, and removes Todoist as a total blind spot despite its low priority.
-4. Prune old SQLite snapshots periodically (e.g. last 30 daily + 12 monthly) so the repo doesn't grow unbounded — binary diffs won't compress well, but at personal scale this is a non-issue. No need for continuous-replication tooling (e.g. Litestream) unless volume actually becomes a real problem later.
+1. Nightly cron (`wm-backup-push.py`, Hermes no_agent job, 03:00): `records.py backup` — a safe SQLite snapshot, consistent against concurrent writes, unlike a raw copy — then the snapshot replaces `records.db` in the working tree, so every committed DB file is a consistent point-in-time copy.
+2. Same run: best-effort Todoist export (open tasks → JSONL) committed alongside as `todoist-export.json` — removes Todoist as a total blind spot despite its low priority.
+3. Same run: `git add -A && git commit && git push origin main` — the off-box copy lags the live repo by at most 24 h. Push failures and vault drift are the only output (the no_agent cron delivers alerts verbatim; a healthy night is silent).
+4. Same run: vault sync check — `git fetch` in `~/wiki` and alert on drift (review-notes decision 7), so a local-only vault commit can't go unnoticed.
+5. No snapshot pruning: git history IS the point-in-time store, covering the whole folder, not just the DB. History grows unbounded, but at personal scale (a ~30 KB DB today) this is a non-issue for years; no need for continuous-replication tooling (e.g. Litestream) unless volume actually becomes a real problem later.
 
-**Canonical domain-tag list placement:** move this into the Obsidian vault (e.g. a `_meta/tags.md` note) rather than `/working-memory/meta/tag-index.json` — it's already git-backed and synced there, one fewer thing the ops repo needs to cover.
+Setup (one-time, 2026-08-28): create an EMPTY private GitHub repo (`working-memory-backup`), add it as `origin` in `~/working-memory`, widen the fine-grained VPS PAT to include it, and register the cron job. The cron alerts nightly until the first successful push.
+
+**Canonical domain-tag list placement:** move this into the Obsidian vault (e.g. a `_meta/tags.md` note) rather than `/working-memory/meta/tag-index.json` — it's already git-backed and synced there, one fewer thing the backup push needs to cover.
 
 ## 6. Scope decision: no backfill or migration (2026-08-27)
 

@@ -211,7 +211,7 @@ rm ~/.hermes/scripts/wm-consolidation-gate.py ~/.hermes/scripts/cron-session-pru
 ## Notes & known limits
 
 - **Text-first captures** — the raw log stores text. Photos and locations are handled as ordinary messages and never become entries on their own; a photo with a caption in a reserved lane captures the caption text. If you want an image remembered, say so in words (e.g. `note the plumber's receipt is in my photos`).
-- **Backup** — the on-box git history is your first backup; push `WM_ROOT` to a private remote or cron a `tar` + rclone for an off-box copy.
+- **Backup** — the on-box git history is the audit trail; a nightly cron (`wm-backup-push.py`, 03:00, no_agent) pushes `WM_ROOT` to a private GitHub remote (off-box copy lags at most 24 h) and alerts on failure. Setup: create an empty private repo, add it as `origin`, widen the PAT to include it.
 - The package deliberately contains **no** bot token flow, no Telegram client, no scheduler daemon — it reuses the infrastructure Hermes already runs.
 
 ## License

@@ -17,7 +17,7 @@ client; you classify, file, retrieve, and remind. **The raw log is the
 immutable, full-text capture record and audit trail** (`~/working-memory/raw/`)
 — every capture is written there first, then routed to its store. Destinations
 (vault notes, SQLite rows, Todoist tasks) are the primary curated artifacts;
-**recovery is the backups' job** (vault git + ops-repo snapshots + Todoist
+**recovery is the backups' job** (vault git + nightly private-remote push + Todoist
 exports), not a rebuild from the log.
 
 **Read before operating:** `second-brain-schema.md` (type/tag/status model —
