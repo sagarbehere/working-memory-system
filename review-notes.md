@@ -17,6 +17,7 @@ Branch created from `main` (the v2.0.0 release line, incl. v2.0.1/v2.0.2 docs). 
 8. **Undated tasks: one home only** — quick errands → Todoist only (`todoist_only`); substantial → vault project only. Confirmation lines show the destination; corrections re-route.
 9. **Mirrored reminders skip local firing** — `mirrored: true` → reminder-check skips; Todoist notification is the reminder; local fires only when the mirror is absent/failed. Completion reconciled in reminder-check (digest out of scope).
 10. **CODE IMPROVEMENT refinement category** — proposals with before/after; on approval, implemented on v3.0.0 (spec + skill + code together, tested, pushed).
+11. **Doc consolidation (2026-08-28)** — v2 spec removed from the branch (dead fork artifact; tags keep it); storage routing canonicalized in schema §10 (guide §4 now references it); wiki SCHEMA type section slimmed to a derived cheat-sheet; anti-drift rule (authoritative files win, update together) added to the mycelium-wiki skill.
 
 ## Schema question — RESOLVED (2026-08-27)
 

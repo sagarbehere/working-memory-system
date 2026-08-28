@@ -42,22 +42,10 @@ Classification heuristics: use §8 of `second-brain-schema.md` directly (structu
 
 ## 4. Storage routing
 
-| `second_brain_type` | Destination | Mechanism |
-|---|---|---|
-| `reminder` | Todoist + local store | API call, create task with due date; mirror flag on the local entry (spec §9) |
-| `record` (`structured`) | SQLite `records` table | `records.py add` (`id, type, domain, occurred_at, entity, data_json, notes`) |
-| `record` (`narrative`) | Obsidian vault `records/` | Dated note, existing LLM Wiki skill |
-| `project` | Obsidian vault `projects/` | Note with `status:` frontmatter |
-| `reference` | Obsidian vault `references/` | Note in `entities/`, `concepts/`, or `procedures/` by `subtype:` |
-| `idea` | Obsidian vault `ideas/` | Atomic note, freely linked |
-| undated task (quick errand) | Todoist ONLY | `todoist_only` flag on the raw entry; no vault note, no local reminder |
-| undated task (substantial) | Obsidian vault `projects/` ONLY | No Todoist mirror unless it later gains a due date (then reminder rules apply) |
-
-**Vault layout (6a, decided 2026-08-28):** type = top-level section
-(`references/`, `records/`, `projects/`, `ideas/`); Reference subtypes are
-sibling subfolders (`references/entities/`, `references/concepts/`,
-`references/procedures/`). Vault notes are ordinary wiki pages: index + log
-entries, natural links.
+**Storage routing is defined in `second-brain-schema.md` §10 (canonical)** —
+including the undated-task single-home rule and the 6a vault layout
+(`references/{entities,concepts,procedures}`, `records/`, `projects/`, `ideas/`).
+Build-relevant notes below.
 
 **Obsidian vault:** already your private GitHub repo, viewed via Working Copy/Obsidian — backup is solved. What needs to change is the *skill*, not the storage: adjust the existing LLM Wiki skill so every write includes `type`, `domain`, `status` (where applicable), and `subtype` (for Reference) in frontmatter, matching `second-brain-schema.md`. Confirm the skill already commits+pushes after each write; if it only commits locally, add the push step — a local-only commit in a repo meant to sync across your devices isn't actually backed up until it's pushed.
 
