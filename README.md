@@ -1,10 +1,10 @@
 # Working Memory System
 
-A personal working-memory system on top of [Hermes Agent](https://hermes-agent.nousresearch.com): capture a thought in plain language, and the agent files it, tags it, retrieves it later, and reminds you on schedule — no folder structures, no categorization effort, no "notes app" to maintain. The raw log is ground truth; topic files are derived caches; **everything is reversible**.
+A personal working-memory system on top of [Hermes Agent](https://hermes-agent.nousresearch.com): capture a thought in plain language, and the agent files it, tags it, retrieves it later, and reminds you on schedule — no folder structures, no categorization effort, no "notes app" to maintain. The raw log is the immutable capture record; typed destinations (SQLite, the Obsidian vault, Todoist) hold the curated artifacts; **everything is reversible**.
 
 It is, at heart, a searchable copy of the parts of your memory you choose to write down — you talk, it organizes, and it learns from corrections.
 
-Full design rationale: [`working-memory-system-spec.md`](working-memory-system-spec.md).
+Design docs: [`second-brain-schema.md`](second-brain-schema.md) (types/tags/status), [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md) (build & backup), [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md) (capture plumbing). The previous v2 line is frozen at tags `v2.0.x`, with its spec preserved there for existing users.
 
 ---
 
@@ -13,13 +13,13 @@ Full design rationale: [`working-memory-system-spec.md`](working-memory-system-s
 - **Capture** — send a thought; it's split into atomic notes, tagged, and filed to an append-only, git-versioned raw log.
 - **Retrieval** — ask naturally ("what did I decide about X?", "what's due this week?") and get a conversational answer.
 - **Reminders** — "remind me Tuesday 8 am to call the plumber" becomes a scheduled message delivered to the chat where you captured it.
-- **Auto-topic promotion** — when the same topic recurs, it's distilled into a topic file; retrieval becomes one lookup instead of archaeology.
+- **Typed routing** — captures are classified (record / project / reference / idea / reminder) and routed to the right store: SQLite for structured records, the Obsidian vault for notes, Todoist for reminders.
 - **Nightly consolidation** — duplicates collapse, superseded facts replace old ones, archives rotate. Quiet by default.
 - **Corrections** — "that's mis-filed, it's about X" / "merge A and B" / "forget Y" — handled immediately, nothing lost.
 
 ## How it works (30 seconds)
 
-A capture-gate hook wraps Hermes' message adapter and buffers text messages from **working-memory lanes** (see below), flushing them as one agent turn after a short debounce. The agent follows the policy in [`SKILL.md`](SKILL.md): classify → file → confirm. All durable state lives under one folder (`WM_ROOT`), itself a git repo for point-in-time backup. Reminders are fired by a tiny cron'd script through the bot you already run.
+A capture-gate hook wraps Hermes' message adapter and buffers text messages from **working-memory lanes** (see below), flushing them as one agent turn after a short debounce. The agent follows the policy in [`SKILL.md`](SKILL.md): classify → file → route → confirm. The capture log lives under one folder (`WM_ROOT`), itself a git repo for point-in-time history; curated artifacts are routed to SQLite and the Obsidian vault. Reminders are fired by a tiny cron'd script through the bot you already run (Todoist mirror optional, config-gated).
 
 ## Prerequisites
 

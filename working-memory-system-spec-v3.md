@@ -1,6 +1,6 @@
 # Working Memory System — Implementation Spec
 
-**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. It describes **v2.0.0**, tagged and frozen. Ongoing second-brain development happens in a separate **v3.0.0** branch, with its own evolving copy of this spec plus `second-brain-schema.md` (type/tag/status classification) and `second-brain-implementation-guide.md` (build/storage-routing/backup) — see the versioning note at the end of this document.
+**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. This copy describes **v3.0.0**, forked from the frozen **v2.0.0** tag and evolving independently in its own branch — see the versioning note at the end of this document. For type/tag/status classification, see `second-brain-schema.md`. For build, storage-routing, and backup mechanics, see `second-brain-implementation-guide.md`.
 
 ## Purpose
 
@@ -91,6 +91,8 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
     refinement-log.md        # curated patterns worth reviewing (Section 17)
 ```
 
+**v3 change:** `topics/<tag>.md` flat files are left behind (implementation guide §2) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
+
 - Raw log files are **never edited**, only appended to. Rotate monthly.
 - Topic files ARE edited/rewritten by the consolidation pass — they're a cache, not history.
 - `tag-index.json` lets the agent find "which raw entries mention X" without re-reading every raw file.
@@ -105,7 +107,8 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 ```
 ## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
 tags: health, vitamin-d
-type: log+reminder
+type: reminder
+domain: health, vitamin-d
 supersedes: 20260817-1610-01
 
 Took vitamin D pill. Next one due in a week.
@@ -115,7 +118,12 @@ Took vitamin D pill. Next one due in a week.
 
 - **id** — deterministic, timestamp-based.
 - **tags** — freeform, assigned by the extraction pass. No fixed vocabulary.
-- **type** — `log` / `reminder` / `log+reminder`.
+- **type** — the v3 classification itself: `reminder | record | project |
+  reference | idea`. (v2's `log/reminder/log+reminder` is gone: a capture with
+  a due date splits into two items — a `record` for the event + a `reminder`
+  for the next due, per schema §3.1's habit model.)
+- **domain** — 1+ tags from the canonical list (`_meta/tags.md` in the vault).
+- **status / record_kind / subtype / file_ref** — as classified per §7.
 - **supersedes** — optional, raw entry id of a prior entry this one updates or replaces.
 
 ---
@@ -128,19 +136,29 @@ Took vitamin D pill. Next one due in a week.
 4. Once flushed, the extraction pass (Section 7) runs against the flushed buffer, returning items classified `capture`, `question`, or `command`.
 5. Question items go to the retrieval handler (Section 12); command items go to the consolidation pass (Section 8). Neither becomes a raw log entry.
 6. Capture items are written as raw log entries (Section 5), tags/type/reminder already resolved by the same extraction call.
-7. Any reminder directive updates `reminders.json` (Section 9).
+7. Any reminder directive updates the local reminder store and mirrors to Todoist (Section 9).
 8. A brief confirmation is sent back once processed ("logged 2 items: health/vitamin-d, printer"), especially useful early on (Section 13).
 
 ---
 
 ## 7. Extraction/tagging pass (LLM call, per flushed buffer)
 
-**Input:** the flushed, concatenated text, plus context for tag reuse and supersession detection: the current tag list from `tag-index.json`, and — for any tag already present as a topic file — that file's current content.
+**Input:** the flushed, concatenated text, plus context for tag reuse and supersession detection: the current canonical domain-tag list, and — for any domain already present in the vault — that note's current content.
 
-This pass does routing (capture/question/command) and, for captures, tagging, in one call:
+This pass does routing (capture/question/command) and, for captures, classification in one call:
 
-- Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — `tags` (1-4 freeform keywords, reusing an existing tag when it obviously matches), `type` (`log`/`reminder`/`log+reminder`), `reminder` (`{due_at, message}` if applicable), and `supersedes` (optional).
-- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these topics," "forget X") — handed to consolidation (Section 8), never producing a raw log entry.
+- Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — the classification per `second-brain-schema.md` (the **`type` field itself carries the v3 class**; no separate `second_brain_type`):
+  - `type`: `reminder | record | project | reference | idea`
+  - if `record`: `record_kind`: `structured | narrative`
+  - if `reference`: `subtype`: `entity | concept | procedure`
+  - `domain`: 1+ flat tags, checked against the canonical list before coining a new one
+  - if `project` or `reference`: `status`, defaulting to `active`
+  - if a `record` or `reference` involves a file: `file_ref` (schema §12)
+  - `reminder` (`{due_at, message}`) when `type: reminder`
+- **Habit captures split** per schema §3.1: "took vitamin D, next due Friday" →
+  two items — a `record` (the completion) + a `reminder` (the next due).
+- Classification heuristics: the structural cues from `second-brain-schema.md` §8 (due-date language → reminder; dated/factual/no action → record; open question/decision → project; "how do I"/stable entity → reference; musing/quote → idea). **Low confidence defaults to `record`** — cheapest to fix later, nothing silently lost.
+- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these topics," "forget X") — handed to consolidation (Section 8), never producing a raw log entry. Corrections can now touch whichever store the original item was routed to (a vault note, a SQLite row, or a Todoist task) — same confirm-before-destructive rule.
 - Splitting is conservative — one coherent thought touching two tags stays one entry; split only for genuinely unrelated content.
 - One LLM call per flushed buffer, kept cheap and fast.
 
@@ -148,32 +166,27 @@ This pass does routing (capture/question/command) and, for captures, tagging, in
 
 ## 8. Promotion & consolidation policy
 
-**Promotion:** occurrence counts per tag tracked in `tag-index.json`, updated synchronously on every raw-entry write. On a tag's 2nd or 3rd occurrence, the agent creates `/topics/<tag>.md`, backfilling prior raw entries. No user input required.
+**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (implementation guide §4) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
 
-**Topic file format:**
-```
----
-tag: vitamin-d
-last_updated: 2026-08-24
----
+**Consolidation (v3):** runs on a schedule or size threshold:
+- Reference-flavored content (procedures, entity pages) can be condensed like the old topic files — it's derived and regenerable.
+- Structured Records in SQLite stay itemized and are never collapsed — they are queryable history, not prose.
+- Supersession: a newer fact replaces the older line (`supersedes`); `status: superseded` on vault notes suppresses them from default answers.
+- Expired lines drop (resolved reminders, "due in a week" facts); the raw entry itself is untouched.
 
-- Took vitamin D pill 2026-08-17, due again 2026-08-24 (reminder set).
-- Weekly cadence, taking consistently since mid-August.
-```
+Fully reversible — derived content regenerates from the raw log, so "that's mis-filed" or "split/merge these" just triggers a regeneration.
 
-**Consolidation:** runs on a schedule or size threshold. Collapses recurring entries into a rolling summary, applies `supersedes` flags (newer replaces older), splits/merges topic files as judged useful, removes expired lines (Section 10). Fully reversible — topic files are derived from the raw log, so "that's mis-filed" or "split/merge these" just triggers a regeneration.
-
-**Handling `command` items:** run immediately, not on the next scheduled pass. "Forget entirely" strikes the underlying raw entry's content too (the one justified exception to "raw log is never edited") — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
+**Handling `command` items:** run immediately, not on the next scheduled pass. "Forget entirely" strikes the underlying raw entry's content too (the one justified exception to "raw log is never edited") and removes or deprecates the derived artifacts — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
 
 ---
 
 ## 9. Reminder scheduler
 
-Separate mechanism from note storage. Built on the VPS's existing cron and Hermes's existing messaging integration — no new scheduler daemon.
+Separate mechanism from note storage. Built on the VPS's existing cron and Hermes's existing messaging integration — no new scheduler daemon. **Two layers (v3):**
 
-- `reminders.json`: flat list of `{id, due_at, message, raw_entry_id, status, origin: {platform, chat_id, thread_id?}}`.
-- A cron entry runs a script that checks this file and, for any due entry, sends the message to the reminder's **origin** — the chat where it was captured. If that address is unreachable (e.g. a deleted chat), it falls back to a configured home channel. No registry, no retry loop — a stale origin degrades to one log line, not silent failure.
-- On firing, mark `status: fired`; the consolidation pass updates the corresponding topic-file line.
+- **Local store (`reminders.json`)** — the source of truth for *firing* and the durable fallback: flat list of `{id, due_at, message, raw_entry_id, status, origin: {platform, chat_id, thread_id?}}`. A cron entry checks this file and, for any due entry, sends the message to the reminder's **origin** — the chat where it was captured; if that address is unreachable (e.g. a deleted chat), it falls back to a configured home channel. Overdue pendings fire as soon as the VPS is back up. On firing, mark `status: fired`. If Todoist is down, degraded, or removed, reminders keep working unchanged from here.
+- **Todoist (mirror / UI layer)** — every reminder Hermes creates is also written to Todoist (best-effort, retried at the next reconciliation). Todoist provides cross-device visibility, the mobile apps, and notifications; it does **not** gate firing. Completion is reconciled back: the user checks tasks off in Todoist, and the daily digest run marks the matching local entry `done`.
+- **Consistency contract:** write local first (durable), then mirror to Todoist; on drift, Todoist's completion state wins for done-ness, the local store wins for firing. Reconcile during the daily digest (schema §11). Tasks created manually in Todoist (not by Hermes) are visible to the digest but have no local mirror entry.
 - Recurring reminders should regenerate their next `due_at` automatically once the agent recognizes the pattern (nice-to-have, not required).
 
 ---
@@ -181,9 +194,9 @@ Separate mechanism from note storage. Built on the VPS's existing cron and Herme
 ## 10. Cleanup & aging
 
 1. **Raw log rotation** — files older than ~60-90 days move to `raw/archive/`, still grep-able.
-2. **Expiry** — time-bound lines (resolved reminders, "due in a week" facts) drop from topic files once resolved; the raw entry itself is untouched.
+2. **Expiry** — time-bound lines (resolved reminders, "due in a week" facts) drop from derived notes once resolved; the raw entry itself is untouched.
 3. **Supersession** — new fact replaces old rather than accumulating (Section 8).
-4. **Size-triggered condensation** — a topic file past ~2-3KB gets a full condense-and-rewrite on its next write.
+4. **Size-triggered condensation** — a derived note (Reference-flavored) past ~2-3KB gets a full condense-and-rewrite on its next write.
 5. **Log rotation** — `logs/` deleted (not archived) after ~30 days; shorter retention than the raw log, since it's diagnostic, not memory.
 
 ---
@@ -201,13 +214,17 @@ Every event below writes one line to the current month's `logs/` file — timest
 
 ## 12. Retrieval flow
 
-Questions are diverted here by the extraction pass — question items never produce a raw log entry.
+Questions are diverted here by the extraction pass — question items never produce a raw log entry. Which store gets searched depends on what is being asked:
 
-**A. Reminder queries** ("what's due this week") — read `reminders.json` directly, filter by `status: pending`, present sorted soonest-first. Authoritative source for "what's still pending"; topic files aren't used here since a topic file's reminder line can be stale once fired.
+**A. Reminder queries** ("what's due this week", "did I take it?") — read the local `reminders.json`, filter by `status: pending`, present sorted soonest-first: the authoritative "still pending" list. For "did it get done" answers, cross-check completion state in Todoist. If the user asks about a task they created manually in Todoist, answer from Todoist.
 
-**B. Everything else** — check `tag-index.json`/topic file names for an obvious match first; if none, search raw log tags more broadly, falling back to the current month's raw log if needed. Answers conversationally; the user doesn't need to know or guess the tag name.
+**B. Structured records** ("when did I last buy X", "BP last month") — query the SQLite `records` table (schema §9) by `domain`/`entity`/date range; answer conversationally. Prescription-overlap checks: pull the relevant rows and diff the `data_json` medicine lists in reasoning, not SQL.
 
-At this personal scale, keyword/tag search over a small file set is sufficient — no vector DB or embedding search needed.
+**C. Vault content (project / reference / idea / narrative record)** — search the vault by title, backlink, or domain tag; exclude `status: archived` / `superseded` from default answers (surface them if explicitly asked). Reference pages look up by name (entity/concept/procedure); Projects by open status.
+
+**D. Everything else, and fallback** — the raw log is the ground truth: `tag-index.json` → current month's raw file → `raw/archive/`. Answers conversationally; the user never needs to know or guess a tag or type name.
+
+At this personal scale, keyword/tag search over a small file set plus a few indexed SQLite columns is sufficient — no vector DB or embedding search needed.
 
 ---
 
@@ -270,6 +287,6 @@ Goal: let Hermes notice when SKILL.md or the underlying design has a gap, withou
 
 ## 18. Versioning note
 
-This spec describes **v2.0.0** — tagged and frozen at this state. Anyone running the current public release (including existing Reddit users) can rely on it not changing further; nothing below affects this document or the install it describes.
+This document (`working-memory-system-spec-v3.md`) is the **v3.0.0** branch's own copy of the spec, forked from the **v2.0.0** tag — the version tagged and frozen for the current public release, including existing Reddit users, who can rely on `working-memory-system-spec.md` at that tag not changing further.
 
-Ongoing development toward a second-brain-oriented data model and storage layer (routing captures by type to Todoist, SQLite, and an Obsidian vault instead of `reminders.json`/topic files) continues in a separate **v3.0.0** branch. That branch carries its own evolving copy of this spec, plus `second-brain-schema.md` (the type/tag/status classification model) and `second-brain-implementation-guide.md` (build order, storage routing, backup plan). v3.0.0 reuses and adapts the plumbing described in Sections 1-17 above rather than rebuilding it — but as a separate branch, not a runtime option on this codebase — so a v2.0.0 install is never affected by v3.0.0 changes, and vice versa.
+v3.0.0 reuses and adapts the plumbing in Sections 1-17 above rather than rebuilding it, and may continue to evolve this document independently of v2.0.0 as the branch develops. It's paired with `second-brain-schema.md` (the type/tag/status classification model) and `second-brain-implementation-guide.md` (build order, storage routing, backup plan) — together, the three documents that describe v3.0.0 in full. A v3.0.0 install is never affected by changes to the frozen v2.0.0 tag, and vice versa.
