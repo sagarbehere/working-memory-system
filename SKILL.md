@@ -91,7 +91,7 @@ and commit `~/working-memory` after the batch):
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
-| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (`todoist_only: true`, no vault note) — **config-gated: until `TODOIST_API_TOKEN` is set (stage 3), route to a vault project instead**; substantial/multi-step → vault project note ONLY (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (`todoist_only: true`, no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` section at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
 
 **Vault write discipline (all vault destinations):**
 - v3 notes **ARE wiki pages**: add an index.md entry under the page's type
@@ -106,7 +106,8 @@ and commit `~/working-memory` after the batch):
 
 **Confirm** with ONE short line after each flush — **showing the destination**:
 `✅ → Todoist: buy stamps` · `✅ → wiki (project): renew passport` ·
-`✅ record (SQLite): BP 128/82` · `✅ → wiki (concept): …`. If the user says
+`✅ → wiki (checklist): WM — X` · `✅ record (SQLite): BP 128/82` ·
+`✅ → wiki (concept): …`. If the user says
 "No, that should be a project note / a Todoist task", re-route on the spot.
 
 ## Retrieve (spec §12 — pick the store by what's asked)

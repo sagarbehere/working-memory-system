@@ -92,6 +92,7 @@ def main():
     s.add_argument("--content", required=True)
     s.add_argument("--due", help="ISO-8601 datetime, e.g. 2026-08-29T09:00:00+05:30")
     s.add_argument("--due-string", help="natural language, e.g. 'friday 9am'")
+    s.add_argument("--parent", help="parent task id (creates a subtask)")
     s.add_argument("--project", default=None, help="project name (default: TODOIST_PROJECT or 'Hermes')")
 
     l = sub.add_parser("list")
@@ -123,6 +124,8 @@ def main():
     elif args.cmd == "create":
         pid = ensure_project(args.project or default_project)
         body = {"content": args.content, "project_id": pid}
+        if args.parent:
+            body["parent_id"] = args.parent
         if args.due:
             body["due_datetime"] = args.due
         elif args.due_string:
@@ -143,6 +146,7 @@ def main():
             print(json.dumps({
                 "id": t["id"], "content": t["content"],
                 "project": projects.get(t.get("project_id")),
+                "parent_id": t.get("parent_id"),
                 "completed_at": t.get("completed_at"),
                 "due": (t.get("due") or {}).get("date"),
             }))

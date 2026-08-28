@@ -161,6 +161,7 @@ Prescription-overlap checks: pull the last two `prescription` rows, hand both `d
 | Reference | Obsidian, `references/{entities,concepts,procedures}/` by subtype, `status:` field | Search by name/title, backlinks |
 | Idea/Quote | Obsidian, `ideas/` | Backlinks, graph view, serendipitous resurfacing |
 | Undated task (quick errand) | Todoist ONLY | `todoist_only` flag on the raw entry; no vault note, no local reminder |
+| Undated task (project-scoped) | Checklist in the project's vault note | `## Checklist` section at the bottom of the note; `- [ ]` lines, agent-maintained (append on capture, tick on completion) |
 | Undated task (substantial) | Obsidian vault `projects/` ONLY | No Todoist mirror unless it later gains a due date (then reminder rules apply) |
 
 **Vault layout (6a, decided 2026-08-28):** type = top-level section

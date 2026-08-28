@@ -16,6 +16,12 @@ Work signals checked (all file-based, read-only):
   3. raw month files older than WM_RAW_RETENTION_DAYS (rotation due)
   4. log files older than 30 days (deletion due)
   5. refinement-log entries with STATUS: PENDING APPROVAL
+  6. OPERATIONAL HEALTH (v3, added 2026-08-28): reminder-send failures,
+     todoist mirror/reconcile failures, extraction fallbacks since the last
+     consolidation; reminders.json anomalies (mirrored-without-id, unknown
+     status); records.db integrity. Emitted as a separate "Health issues"
+     block, only when something is actually off — a healthy system stays
+     silent, so the nightly AI call is still skipped.
 """
 
 import datetime as _dt
@@ -47,19 +53,18 @@ def load_env(path: str) -> dict:
 
 
 def parse_dt(s: str):
-    """Parse ISO timestamp from raw entries or log lines; tz-naive → local."""
+    """Parse ISO timestamp from raw entries or log lines; ALWAYS returns an
+    aware datetime (tz-naive input is assumed to be local, UTC+05:30)."""
     if not s:
         return None
     s = s.strip()
     try:
-        return _dt.datetime.fromisoformat(s)
-    except ValueError:
-        pass
-    # tz-naive: assume local time (UTC+05:30 for this VPS)
-    try:
-        return _dt.datetime.fromisoformat(s + "+05:30")
+        dt = _dt.datetime.fromisoformat(s)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+    return dt
 
 
 def last_consolidation_ts(root: str):
@@ -195,6 +200,83 @@ def pending_approvals(root: str) -> int:
         return 0
 
 
+def health_issues(root: str, since) -> list:
+    """Operational health checks — return real problems only (silent when healthy).
+
+    Local-only by design: the gate never calls external APIs. Mirror/reconcile
+    failures surface here via the log lines reminder-check already writes.
+    """
+    issues = []
+
+    # 1. Failure log-lines since the last consolidation (component/event -> n)
+    fail_counts = {}
+    logs_dir = os.path.join(root, "logs")
+    if os.path.isdir(logs_dir):
+        for fn in sorted(os.listdir(logs_dir)):
+            if not re.match(r"\d{4}-\d{2}\.log$", fn):
+                continue
+            try:
+                with open(os.path.join(logs_dir, fn)) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        ts = parse_dt(str(obj.get("ts", "")))
+                        if since is not None and ts and ts <= since:
+                            continue
+                        if obj.get("outcome") in ("failed", "retry", "unfiled-fallback"):
+                            key = (obj.get("component", "?"), obj.get("event", "?"))
+                            fail_counts[key] = fail_counts.get(key, 0) + 1
+            except OSError:
+                continue
+    for (comp, ev), n in sorted(fail_counts.items()):
+        issues.append(f"{comp} {ev}: {n} failure(s) since last consolidation")
+
+    # 2. reminders.json structural sanity
+    rem_path = os.path.join(root, "reminders.json")
+    if os.path.isfile(rem_path):
+        try:
+            with open(rem_path) as f:
+                reminders = json.load(f)
+            inconsistent = [
+                r.get("id") for r in reminders
+                if r.get("mirrored") and not r.get("todoist_id")
+            ]
+            unknown_status = [
+                r.get("id") for r in reminders
+                if r.get("status") not in ("pending", "fired", "done")
+            ]
+            if inconsistent:
+                issues.append("reminders marked mirrored but missing todoist_id: "
+                              + ", ".join(map(str, inconsistent)))
+            if unknown_status:
+                issues.append("reminders with unknown status: "
+                              + ", ".join(map(str, unknown_status)))
+        except (OSError, ValueError) as exc:
+            issues.append(f"reminders.json unreadable: {exc}")
+
+    # 3. records.db integrity (stdlib sqlite3; missing DB = nothing to check)
+    db_path = os.path.join(root, "records.db")
+    if os.path.isfile(db_path):
+        try:
+            import sqlite3
+            con = sqlite3.connect(db_path)
+            try:
+                row = con.execute("PRAGMA integrity_check").fetchone()
+                if row and row[0] != "ok":
+                    issues.append(f"records.db integrity check: {row[0]}")
+            finally:
+                con.close()
+        except Exception as exc:
+            issues.append(f"records.db check failed: {exc}")
+
+    return issues
+
+
 def main() -> int:
     env = load_env(ENV_PATH)
     root = os.path.expanduser(env.get("WM_ROOT", DEFAULT_ROOT))
@@ -242,6 +324,13 @@ def main() -> int:
     if lines:
         print("Consolidation work detected:")
         print("\n".join(lines))
+
+    health = health_issues(root, since)
+    if health:
+        print("Health issues detected:")
+        for h in health:
+            print("- " + h)
+
     # else: print nothing → scheduler skips AI call, no session created.
     return 0
 

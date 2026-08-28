@@ -18,6 +18,7 @@ Branch created from `main` (the v2.0.0 release line, incl. v2.0.1/v2.0.2 docs). 
 9. **Mirrored reminders skip local firing** — `mirrored: true` → reminder-check skips; Todoist notification is the reminder; local fires only when the mirror is absent/failed. Completion reconciled in reminder-check (digest out of scope).
 10. **CODE IMPROVEMENT refinement category** — proposals with before/after; on approval, implemented on v3.0.0 (spec + skill + code together, tested, pushed).
 11. **Doc consolidation (2026-08-28)** — v2 spec removed from the branch (dead fork artifact; tags keep it); storage routing canonicalized in schema §10 (guide §4 now references it); wiki SCHEMA type section slimmed to a derived cheat-sheet; anti-drift rule (authoritative files win, update together) added to the mycelium-wiki skill.
+12. **Project checklists + gate health (2026-08-28)** — project-scoped to-dos live as a `## Checklist` section at the bottom of the project note (agent-maintained `- [ ]` lines), keeping project-internal tasks out of Todoist; quick errands stay Todoist-only. The nightly gate now emits a "Health issues" block (reminder/mirror/extraction failures since last consolidation, reminders.json anomalies, records.db integrity) — silent when healthy, so the nightly AI call is still skipped on clean nights.
 
 ## Schema question — RESOLVED (2026-08-27)
 
