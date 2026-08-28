@@ -16,13 +16,15 @@ echo "Data:    $WM_ROOT"
 echo "Hermes:  $HERMES_HOME"
 
 # 1. Data skeleton (spec Section 3/4)
-mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/topics" "$WM_ROOT/meta" "$WM_ROOT/logs"
+mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/meta" "$WM_ROOT/logs"
 if [ ! -f "$WM_ROOT/reminders.json" ]; then
   echo "[]" > "$WM_ROOT/reminders.json"
 fi
 if [ ! -f "$WM_ROOT/meta/lanes.json" ]; then
   echo "{}" > "$WM_ROOT/meta/lanes.json"
 fi
+# 1b. v3: structured-records store (schema §9) — creates records.db (safe to re-run)
+python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
 
 # 2. Backup git repo (spec Section 3) — repo-local identity, no global config
 if [ ! -d "$WM_ROOT/.git" ]; then
@@ -64,11 +66,13 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - wm-consolidation-gate.py  -> nightly consolidation gate (context
 #         script: empty output = no work = scheduler skips the AI call)
 #       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
+#       - records.py                -> v3 structured-records store CLI
 mkdir -p "$HERMES_HOME/scripts"
-rm -f "$HERMES_HOME/scripts/wm-consolidation-gate.py" "$HERMES_HOME/scripts/cron-session-prune.py"
+rm -f "$HERMES_HOME/scripts/wm-consolidation-gate.py" "$HERMES_HOME/scripts/cron-session-prune.py" "$HERMES_HOME/scripts/records.py"
 install -m 755 "$PKG_DIR/wm-consolidation-gate.py" "$HERMES_HOME/scripts/wm-consolidation-gate.py"
 install -m 755 "$PKG_DIR/cron-session-prune.py" "$HERMES_HOME/scripts/cron-session-prune.py"
-echo "Cron scripts installed: $HERMES_HOME/scripts/wm-consolidation-gate.py, cron-session-prune.py (copies)"
+install -m 755 "$PKG_DIR/records.py" "$HERMES_HOME/scripts/records.py"
+echo "Cron/helper scripts installed: $HERMES_HOME/scripts/wm-consolidation-gate.py, cron-session-prune.py, records.py (copies)"
 
 # 5. Runtime env (never overwrite user edits)
 if [ ! -f "$HERMES_HOME/working-memory.env" ]; then

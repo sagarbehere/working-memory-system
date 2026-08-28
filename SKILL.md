@@ -91,7 +91,7 @@ and commit `~/working-memory` after the batch):
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
-| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (raw entry flag `todoist_only: true`, no vault note); substantial/multi-step → vault project note ONLY (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (`todoist_only: true`, no vault note) — **config-gated: until `TODOIST_API_TOKEN` is set (stage 3), route to a vault project instead**; substantial/multi-step → vault project note ONLY (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
 
 **Vault write discipline (all vault destinations):**
 - v3 notes **ARE wiki pages**: add an index.md entry under the page's type
