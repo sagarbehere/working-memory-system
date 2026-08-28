@@ -133,7 +133,7 @@ def main():
             print(json.dumps({
                 "id": t["id"], "content": t["content"],
                 "completed_at": t.get("completed_at"),
-                "due": (t.get("due") or {}).get("datetime"),
+                "due": (t.get("due") or {}).get("date"),
             }))
     elif args.cmd == "close":
         _req("POST", f"tasks/{args.id}/close")
