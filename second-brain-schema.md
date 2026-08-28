@@ -116,6 +116,8 @@ Structural cues, not content cues:
 - Dated, factual, no action implied → **Record**
 - Open question or decision pending → **Project**
 - "How do I / here's how" or a stable entity (person/place/thing) → **Reference**
+- Decision-time analysis (comparison/tradeoffs) → **Reference / Concept** if worth rereading after the decision; otherwise Project support material (the §14 test)
+- Challenge + solution (puzzle) → **Reference / Concept**; difficulty/subject are domain tags (§14)
 - Musing, quote, no time element, no action → **Idea/Quote**
 - Low confidence → default to **Record**
 
@@ -199,3 +201,17 @@ Binary files stay in whatever existing sync system already handles them well (e.
 - Whether Karpathy-style confidence decay (§4) gets adopted once binary status is tested in practice.
 - Staleness thresholds in §11 — tune after real-world digest runs.
 - Whether Todoist migration (§10) fully replaces Things 3, or Things 3 stays for non-second-brain personal task use.
+
+## 14. Schema decisions & extension protocol (2026-08-27)
+
+Ruling from the schema author on the wiki page shapes that didn't obviously fit the five types. **No schema change.**
+
+**Comparison pages → Reference / Concept.** Being retrieved at a decision moment doesn't distinguish a type — every Reference page is read exactly when it's needed, whether that's a procedure being followed or a person's page being checked. What matters is whether the content stays evergreen (updated in place, worth rereading later for its own sake) versus disposable scaffolding for one closing decision. **Test:** would you reread this for a reason other than nostalgia, after the decision's made? Yes → it's a genuine Concept page (a tradeoff analysis is exactly the "idea/topic explanation" Concept covers). No → it was really supporting material for a Project, and should close/archive alongside that Project rather than live on as standalone Reference.
+
+**Puzzle pages → Reference / Concept.** A challenge statement plus its solution is structurally the same shape as any other explanatory page. (A hidden-until-revealed answer would have been a genuinely new retrieval shape, not covered by any existing type or subtype — but that property isn't in play here, so it doesn't apply.) Difficulty and subject are ordinary domain tags (`domain: puzzle, math, difficulty: medium`) — the same flat-tag mechanism used everywhere else; if a puzzle collection grows large enough to need finer filtering, that's the existing nested-tag exception (`domain/puzzle/math`), not a new type.
+
+**Query pages** (filed answers with provenance): covered by the same test — evergreen/reusable → Reference/Concept; one-off → Project support material. (The `queries/` bucket is currently empty, so this is prospective, not a migration.)
+
+**General principle:** extend the schema for a genuinely new retrieval or engagement shape — something no existing type/subtype captures — never for a new domain or a property content could have but doesn't actually get used for here. Domains and optional properties are tags; only a real structural mismatch justifies a new type.
+
+**When to raise a schema-extension question rather than force-fit:** if something to be captured doesn't clearly match any existing type/subtype after applying the standard classification heuristics, and forcing it into the closest-fitting one would produce a page that's misleading to future retrieval (e.g. filed as Concept but doesn't actually explain anything, or filed as Record but needs to be queried in a way SQLite's flat schema can't support) — that's the signal to stop and ask, rather than silently coin a new tag or bend an existing type's meaning. One genuinely ambiguous item is fine to default (the low-confidence fallback); if the same kind of content recurs and keeps sitting awkwardly in its assigned type, that's a repeated-pattern signal for the refinement log — surface it as a proposed schema/tag change with a brief before/after rationale, and wait for sign-off before applying, the same approval-boundary rule governing other policy changes.
