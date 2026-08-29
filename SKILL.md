@@ -1,6 +1,6 @@
 ---
 name: working-memory
-description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
+description: "Use for the working-memory system (second brain): input in a reserved lane or starting with 'Hey memory'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
 version: 3.0.0
 author: Sagar Behere
 license: MIT
@@ -10,22 +10,23 @@ metadata:
     related_skills: [hermes-agent]
 ---
 
-# Working Memory v3 (Second Brain)
+# Working Memory System
 
 Personal second-brain system: the user captures thoughts via any connected
-client; you classify, file, retrieve, and remind. **The raw log is the
-immutable, full-text capture record and audit trail** (`$WM_ROOT/raw/`)
-— every capture is written there first, then routed to its store. Destinations
-(vault notes, Todoist tasks) are the primary curated artifacts;
-**recovery is the backups' job** (vault git + nightly private-remote push + Todoist
-exports), not a rebuild from the log.
+client; you classify, file, retrieve, and remind.
 
-**Read before operating:** `second-brain-schema.md` (type/tag/status model —
-read this first), `decisions.md` (routing/backup
-rationale), `working-memory-system-spec-v3.md` (capture plumbing), then
-`logs/` (what actually happened). Same three-tier escalation as v2, extended.
+**The transcript (`$WM_ROOT/raw/`) is an append-only record of what the user
+actually said** — every capture goes there first, before you decide anything
+about it. The curated artifacts are the destinations (vault notes, Todoist
+tasks); nothing is ever rebuilt from the transcript, and recovery is the
+backups' job (the vault's own remote, the nightly push, the Todoist export).
 
-## Scope guard (unchanged from v2)
+**Read before operating:** `second-brain-schema.md` (the type/tag/status model
+— read this first), `working-memory-system-spec-v3.md` (how this system files
+those types, §5a), `decisions.md` (why, and what is deliberately absent), then
+`logs/` (what actually happened).
+
+## Scope guard
 
 Working-memory input is any message that (a) arrives in a **reserved lane**
 (`meta/lanes.json`, or the legacy env lane), or (b) starts with a marker:
@@ -41,8 +42,7 @@ neither capture/question/command, and is answered normally — nothing filed.)
    hook has updated `meta/lanes.json`; confirm in one line, file nothing.
 2. Split into items — conservative: one coherent thought = one item.
 3. Classify each item: `capture` / `question` / `command`.
-4. Capture → **Capture & classify** below. Question → **Retrieve**. Command →
-   **Command**.
+4. Capture → **Capture** below. Question → **Retrieve**. Command → **Command**.
 5. Chit-chat → answer normally.
 
 ## Capture: transcript first, then classify & route
@@ -53,14 +53,14 @@ neither capture/question/command, and is answered normally — nothing filed.)
 python3 ~/.hermes/scripts/rawlog.py add --text "<the thought, marker stripped>"
 ```
 
-That is the whole call: a timestamp and your words, nothing else. It prints
-`{"ts": …, "duplicate": false}`; `"duplicate": true` means an identical
-capture landed within 24h, so it is already filed — do not route it again.
+That is the whole call — a timestamp and the user's words, nothing else. It
+prints `{"ts": …, "duplicate": false}`; `"duplicate": true` means an identical
+capture already landed within 24h, so it is filed: do not route it again.
 
-The transcript exists because **you are the unreliable part of this system**:
-if you mis-file a thought, or judge a real one to be chit-chat, the verbatim
-text is the only thing that survives your mistake. It carries no
-classification — the destination note does — and nothing links back to it.
+The transcript exists because **your judgment is the fallible part of this system**: if
+you mis-file something, or decide a real thought was chit-chat, the user's
+words still survive that mistake. The transcript carries no classification —
+the destination note does — and nothing links back to it.
 
 Then classify the item and route it:
 
@@ -68,9 +68,11 @@ Then classify the item and route it:
   with a due date splits into *two items*: a `record` for the event plus a
   `reminder` for the next due (schema §3.1's habit model).
 - **`domain`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
-  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). Classify against it first;
-  coin a new tag only when nothing fits, adding it to that list in the same
-  operation (a policy change → refinement log).
+  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). Classify against it first
+  and prefer the closest existing tag. When genuinely nothing fits, coin one:
+  add it to the list in the same operation and **tell the user you did** —
+  this is do-then-inform (schema §6), not something to wait on. They can veto,
+  and then the tag comes back out and the entry is re-tagged.
 - Heuristics (schema §8): due-date language → `reminder`; dated/factual/no
   action → `record`; open question/decision → `project`; "how do I"/stable
   entity → `reference`; musing/quote → `idea`; decision-time analysis →
@@ -80,18 +82,19 @@ Then classify the item and route it:
 
 | `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | **Todoist** — the only reminder mechanism | `python3 ~/.hermes/scripts/todoist.py create --content <text> --due <ISO-8601 with offset>` (or `--due-string "friday 9am"`). Todoist notifies on every device; nothing fires locally. If the call fails, say so plainly — the capture is safe in the transcript but **the reminder does not exist**, so do not claim it was set. |
+| `reminder` | **Todoist** — the only reminder mechanism | See **Reminders** below for the command and the failure rule. |
 | `record` — one-off | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `record` — recurring series | **append to the series note** | A measurement or repeated observation (BP, headaches, weight) goes as ONE line appended to a single topical note, e.g. `records/blood-pressure.md` — never a note per reading. Keep the line consistently formatted (date first, then values) so the whole history reads as a table. |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable) |
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
+| **artifact** (photo, PDF, scan) | leave the file where it already syncs; file a `record` note with `file_ref:` | Never copy the file into the vault. `file_ref` must be a **stable** location, never a path the user might reorganise (schema §9). If you only have a chat attachment and no durable path, say so and ask where it lives. |
 | **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body |
 
 **Vault write discipline (all vault destinations):**
-- v3 notes **ARE wiki pages**: add an index.md entry under the page's type
-  section + a log.md line; frontmatter per the vault SCHEMA; link related notes
-  when natural (no forced minimum).
+- These notes **ARE ordinary wiki pages**: add an index.md entry under the
+  page's type section and a log.md line, follow the vault's own frontmatter
+  conventions, and link related notes when it is natural (no quota).
 - Frontmatter: `type`, `domain`, `status` (where applicable), `subtype`
   (references), `created`/`updated`.
 - **Commit AND push in the vault (`WM_VAULT_PATH`, default `~/wiki`) after every write** — a local-only commit in a
@@ -119,8 +122,9 @@ Then classify the item and route it:
   title/backlink/domain tag. Exclude `status: archived|superseded` from
   default answers (surface if explicitly asked).
 - **Fallback — "did I ever say…"** → `rawlog.py search --text "…" [--since …]`.
-  This is the transcript of what you actually said, so it answers questions
-  the filed notes cannot. Never read `raw/` by hand.
+  The transcript holds the user's own words, so it answers questions the filed
+  notes cannot — including about things that were never filed. Never read
+  `raw/` by hand.
 
 ## Command (run immediately)
 
@@ -135,8 +139,8 @@ Then classify the item and route it:
 
 ## Upkeep
 
-There is **no scheduled agent job** (2026-08-29 cut). Nothing wakes you on a
-timer, so upkeep happens when it comes up in conversation:
+There is **no scheduled agent job**. Nothing wakes you on a timer, so upkeep
+happens only when it comes up in conversation:
 
 - Series notes stay itemised — never collapse a measurement history.
 - Supersession: a newer fact replaces an older one; mark the old
@@ -150,19 +154,24 @@ old logs. It is not an agent job and costs no tokens.
 
 ## Reminders (Todoist only)
 
-- **Todoist is the reminder mechanism, not a mirror.** There is no local
-  reminder store and nothing fires from this box; Todoist notifies on every
-  device. If `TODOIST_API_TOKEN` is unset, reminders are unavailable — say so
-  rather than pretending to set one.
-- Create: `todoist.py create --content <text> --due <ISO-8601 with offset>`,
-  or `--due-string "friday 9am"` when the user's phrasing is natural language
-  and unambiguous. Report failure plainly; the transcript keeps the words but
-  the reminder will not exist.
-- "Mark X done" → `todoist.py list` to find the id, then
-  `todoist.py close --id <id>`. Abandoned → `todoist.py delete --id <id>`.
+Todoist **is** the reminder mechanism — not a mirror of one. Nothing fires
+from this machine, and there is no local reminder store.
+
+```
+python3 ~/.hermes/scripts/todoist.py create --content <text> --due <ISO-8601 with offset>
+```
+
+Use `--due-string "friday 9am"` instead when the user's own phrasing is
+natural language and unambiguous, and `--due-string "every monday 9am"` for
+anything recurring — Todoist owns recurrence, so never hand-roll the next
+occurrence yourself.
+
+- **If the call fails, or `TODOIST_API_TOKEN` is unset, the reminder does not
+  exist.** The transcript still has the words. Say that plainly; never report
+  a reminder you did not manage to set.
+- "Mark X done" → `todoist.py list` for the id, then `close --id <id>`.
+  Abandoned → `delete --id <id>`.
 - "What's due" → `todoist.py list`, soonest first.
-- Recurring reminders: use Todoist's own recurrence via `--due-string`
-  ("every monday 9am"). Do not hand-roll regeneration.
 
 ## Refinement loop
 
@@ -191,16 +200,19 @@ Approval boundary:
 
 ## Failure handling
 
-- Extraction fails → retry once → single untagged `unfiled` raw entry, never
-  drop a capture; log the fallback.
-- A structured-record insert fails → log; keep the raw entry; retry at next
-  the conversation you are in.
-- Telegram reply fails → retry once; don't claim success.
+- **Can't classify it?** The transcript already has the text, so nothing is
+  lost. Say you filed it but couldn't place it, and ask — do not guess a
+  destination to look decisive. Log the fallback (`outcome: unfiled-fallback`)
+  so the nightly watchdog can surface a pattern of them.
+- **A vault write fails?** Say so. The transcript has the words; the note does
+  not exist. Never report a destination you did not reach.
+- **A reply fails to send?** Retry once, then stop. Do not claim success.
 
 ## Escalation
 
-Not clearly covered? Consult in order: `decisions.md`
-(routing/backup decisions) → `second-brain-schema.md` (type/tag/status model)
-→ `working-memory-system-spec-v3.md` (plumbing rationale) → `logs/` (past
-runs). SKILL.md is git-versioned on `main` — every accepted
-refinement is diffable and revertible.
+Not clearly covered? Consult in order: `second-brain-schema.md` (what kind of
+thing is this?) → `working-memory-system-spec-v3.md` §5a (where does that kind
+of thing go here?) → `decisions.md` (why is it this way, and what was
+deliberately not built?) → `logs/` (what happened on a past run). SKILL.md is
+git-versioned on `main`, so every accepted refinement is diffable and
+revertible.
