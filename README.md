@@ -4,9 +4,11 @@ A personal second brain you talk to. Send a thought from any chat client; it
 gets filed. Ask later in plain language; it comes back. Anything with a
 deadline turns into a reminder that reaches every device you own.
 
-It runs as a skill inside [Hermes](https://github.com/sagarbehere/hermes), a
-self-hosted personal-agent gateway, on your own machine. There is no app, no
-web UI, and nothing to log into.
+It runs as a skill inside [Hermes](https://hermes-agent.nousresearch.com/) —
+an open-source, self-hosted agent framework that connects to Telegram,
+Discord, Slack, Signal, email and more, and keeps one memory across all of
+them. This project has no app and no UI of its own: your chat client is the
+interface.
 
 ---
 
@@ -109,8 +111,9 @@ Where things end up:
 
 This is a personal system, published because a few people asked. It assumes:
 
-- **[Hermes](https://github.com/sagarbehere/hermes)** running on a machine of
-  yours, with at least one chat platform connected.
+- **[Hermes](https://hermes-agent.nousresearch.com/)** running on a machine of
+  yours, with at least one chat platform connected. Everything below assumes a
+  working Hermes install — that is the thing this plugs into.
 - **A Todoist account.** Reminders are Todoist tasks; there is no local
   reminder store and nothing fires from your machine. Without a token,
   capture and notes work fine but reminders are unavailable.
