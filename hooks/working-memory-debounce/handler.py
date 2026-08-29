@@ -52,12 +52,28 @@ import sys
 from datetime import datetime
 
 HOOK_NAME = "working-memory-debounce"
+# Set by install_patches(); referenced by the flush/dispatch coroutines.
+orig_handle_message = None
 HERMES_HOME = pathlib.Path(
     os.environ.get("HERMES_HOME") or str(pathlib.Path.home() / ".hermes")
 )
 
+# Share the package's env/time helpers when reachable. The hook directory is
+# symlinked into ~/.hermes/hooks/, so resolve() lands in the package and the
+# parent is its root. Guarded on purpose: this module is imported by the
+# gateway at startup, and an ImportError here would silently disable capture
+# for every platform — a shared helper is not worth that risk, so a failure
+# falls back to the local implementations below.
+try:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+    import wmlib as _wmlib
+except Exception:  # noqa: BLE001 - never break gateway startup
+    _wmlib = None
+
 
 def _load_env_file(path):
+    if _wmlib is not None:
+        return _wmlib.load_env_file(path)
     env = {}
     try:
         for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
@@ -65,10 +81,22 @@ def _load_env_file(path):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            env[key.strip()] = value.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            env[key.strip()] = value
     except FileNotFoundError:
         pass
     return env
+
+
+def _now():
+    """Timezone-aware now. Log timestamps used to be naive local time, which
+    made them incomparable with the offset-aware stamps in raw entries — and
+    the consolidation gate compares exactly those two."""
+    if _wmlib is not None:
+        return _wmlib.now()
+    return datetime.now().astimezone()
 
 
 WM_ENV = _load_env_file(HERMES_HOME / "working-memory.env")
@@ -98,20 +126,20 @@ RELEASE_PHRASE = "release for memory"
 
 
 def _log(component, event, outcome, **extra) -> None:
-    """Append one JSON line to logs/YYYY-MM.log (spec Section 11)."""
+    """Append one JSON line to logs/YYYY-MM.log (spec: Error handling)."""
     try:
+        stamp = _now()
         log_dir = WM_ROOT / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         line = {
-            "ts": datetime.now().isoformat(timespec="seconds"),
+            "ts": stamp.isoformat(timespec="seconds"),
             "component": component,
             "event": event,
             "outcome": outcome,
             **extra,
         }
-        log_file = log_dir / f"{datetime.now():%Y-%m}.log"
-        with log_file.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(line) + "\n")
+        with (log_dir / f"{stamp:%Y-%m}.log").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line, ensure_ascii=False) + "\n")
     except Exception as exc:
         print(f"[hooks] WM log failed: {exc}", flush=True)
 
@@ -191,7 +219,7 @@ def _record_reservation(source, action: str) -> None:
             "platform": str(getattr(source, "platform", "") or ""),
             "chat_id": str(getattr(source, "chat_id", "") or ""),
             "thread_id": str(getattr(source, "thread_id", "") or ""),
-            "reserved_at": datetime.now().isoformat(timespec="seconds"),
+            "reserved_at": _now().isoformat(timespec="seconds"),
         }
     else:
         LANES.pop(key, None)
@@ -204,7 +232,9 @@ def _parse_marker(text) -> "str | None":
     """Return the matched marker token, or None.
 
     Word-boundary rule: the marker must be followed by whitespace,
-    punctuation, or end-of-message.
+    punctuation, or end-of-message. Hyphen and underscore count as word
+    characters, not punctuation — otherwise "note-taking is hard" and
+    "note_to_self: ..." were both captured as memory input.
     """
     if not text:
         return None
@@ -212,7 +242,7 @@ def _parse_marker(text) -> "str | None":
     for m in MARKERS:
         if low.startswith(m):
             nxt = low[len(m):len(m) + 1]
-            if not nxt or not nxt.isalnum():
+            if not nxt or not (nxt.isalnum() or nxt in "-_"):
                 return m
     return None
 
@@ -234,10 +264,44 @@ def _reservation_action(text) -> "str | None":
 
 # -------------------------------------------------------------- buffer
 
+def _adapter_platform(adapter) -> str:
+    """Best-effort platform name for an adapter instance ('' if unknown)."""
+    for attr in ("platform", "PLATFORM", "name"):
+        val = getattr(adapter, attr, None)
+        if val is None:
+            continue
+        if hasattr(val, "value"):
+            val = val.value
+        val = str(val).strip().lower()
+        if val:
+            return val
+    return ""
+
+
 def _persist(adapter) -> None:
-    """Write all in-memory WM buffers to pending-buffer.json (atomic)."""
+    """Merge this adapter's buffers into pending-buffer.json (atomic).
+
+    MERGE, not overwrite. Every platform adapter is a separate instance with
+    its own ``_wm_buffers``, but they share one pending-buffer.json — so
+    writing the file from a single adapter's view erased every other
+    platform's buffered thought. On a Telegram + Open WebUI install, any
+    message on one platform silently dropped the other's crash-recovery
+    entry. Keys not owned by this adapter are carried through untouched.
+    """
+    own = getattr(adapter, "_wm_buffers", {})
     data = {}
-    for key, event in getattr(adapter, "_wm_buffers", {}).items():
+    try:  # start from what is already on disk (other adapters' keys)
+        existing = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            data = existing
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    mine = set(getattr(adapter, "_wm_owned_keys", ()))
+    for key in mine - set(own):
+        data.pop(key, None)  # this adapter flushed it — drop it from the file
+
+    for key, event in own.items():
         src = getattr(event, "source", None)
         data[key] = {
             "text": event.text or "",
@@ -245,19 +309,27 @@ def _persist(adapter) -> None:
             "source": src.to_dict() if hasattr(src, "to_dict") else {},
             "media_urls": list(event.media_urls or []),
             "media_types": list(event.media_types or []),
-            "buffered_at": datetime.now().isoformat(),
+            "buffered_at": _now().isoformat(timespec="seconds"),
         }
+    adapter._wm_owned_keys = set(own)
+
     try:
         PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = PENDING_FILE.with_name(PENDING_FILE.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(PENDING_FILE)
     except Exception as exc:  # never break the message pipeline over persistence
         print(f"[hooks] WM persist failed: {exc}", flush=True)
 
 
 def _recover(adapter) -> None:
-    """Reload persisted buffers after a gateway restart and re-arm timers."""
+    """Reload this adapter's persisted buffers and re-arm their timers.
+
+    Only keys belonging to THIS adapter's platform are claimed. Recovery
+    used to load every key into whichever adapter initialised first, so a
+    Telegram buffer could be re-armed on the api_server adapter and then
+    flushed back out through the wrong platform's send path.
+    """
     try:
         data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -265,8 +337,14 @@ def _recover(adapter) -> None:
     from gateway.platforms.base import MessageEvent
     from gateway.session import SessionSource
 
+    platform = _adapter_platform(adapter)
     for key, blob in data.items():
         if key in getattr(adapter, "_wm_buffers", {}):
+            continue
+        # Lane keys are "<platform>:<chat>:<thread>"; claim only our own.
+        # An adapter whose platform can't be determined claims everything,
+        # preserving the old behaviour rather than dropping the buffer.
+        if platform and not key.startswith(platform + ":"):
             continue
         try:
             src = SessionSource.from_dict(blob.get("source", {}))
@@ -331,6 +409,16 @@ def install_patches() -> None:
     global orig_handle_message
     from gateway.platforms.base import BasePlatformAdapter
 
+    # Idempotence guard. This captured whatever handle_message currently was
+    # and installed on top of it, so a second import under a different module
+    # name (the hook dir is symlinked, which makes that easy) would capture
+    # the ALREADY-PATCHED function as "original" and recurse forever on the
+    # next message.
+    if getattr(BasePlatformAdapter.handle_message, "_wm_patched", False):
+        print(f"[hooks] {HOOK_NAME}: already installed — skipping re-patch",
+              flush=True)
+        return
+
     orig_handle_message = BasePlatformAdapter.handle_message
 
     def _ensure_state(self) -> None:
@@ -376,7 +464,13 @@ def install_patches() -> None:
             _persist(self)
             if buffered is not None:
                 _log("capture-gate", "manual-flush", "dispatched", trigger=".", key=key)
-                asyncio.create_task(_dispatch_now(self, buffered))
+                # Keep a reference: a bare create_task is only weakly held by
+                # the loop and can be garbage-collected mid-dispatch.
+                task = asyncio.create_task(_dispatch_now(self, buffered))
+                self._wm_tasks[key] = task
+                task.add_done_callback(
+                    lambda t, k=key: self._wm_tasks.pop(k, None)
+                    if self._wm_tasks.get(k) is t else None)
             return
 
         event.auto_skill = WM_SKILL  # deterministic skill injection on new sessions
@@ -407,6 +501,7 @@ def install_patches() -> None:
             flush=True,
         )
 
+    wm_handle_message._wm_patched = True
     BasePlatformAdapter.handle_message = wm_handle_message
 
     # /done — Telegram command interception for the manual flush.
@@ -446,11 +541,17 @@ def install_patches() -> None:
                     if cmd == "/done":
                         chat_id = str(getattr(getattr(msg, "chat", None), "id", "") or "")
                         thread_id = str(getattr(msg, "message_thread_id", "") or "")
-                        if _telegram_lane_key(chat_id, thread_id) not in LANES:
+                        lane = _telegram_lane_key(chat_id, thread_id)
+                        _ensure_state(self)
+                        # Consume /done for a reserved lane OR any chat with a
+                        # live buffer: a marker-started capture ("note ...") is
+                        # buffered without reserving the lane, and /done used to
+                        # fall through to "Unknown command" there while "."
+                        # worked — same flush, two different behaviours.
+                        if lane not in LANES and lane not in self._wm_buffers:
                             return await orig_command(self, update, context)
                         if not self._should_process_message(msg, is_command=True):
                             return
-                        _ensure_state(self)
                         event = self._build_message_event(
                             msg, MessageType.COMMAND, update_id=update.update_id
                         )

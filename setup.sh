@@ -31,20 +31,62 @@ python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
 #    ESTABLISHED repo: identity config only, NEVER commit — pending changes
 #    belong to whoever made them (capture pipeline, agent edits); a catch-all
 #    commit here raced an in-flight edit and mislabeled it "init:" (2026-08-29).
+#
+#    The live SQLite database is deliberately NOT tracked: it is a WAL-mode
+#    file whose committed form must be a consistent snapshot, which
+#    wm-backup-push.py writes separately as records-snapshot.db.
+WM_IGNORES='meta/pending-buffer.json
+meta/*.lock
+logs/
+*.tmp
+records.db
+records.db-wal
+records.db-shm
+records.db.pre-migrate'
+
 if [ ! -d "$WM_ROOT/.git" ]; then
   git -C "$WM_ROOT" init -q
   git -C "$WM_ROOT" config user.name "Hermes Working Memory"
   git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
-  if [ ! -f "$WM_ROOT/.gitignore" ]; then
-    printf 'meta/pending-buffer.json\nmeta/reminder-check.lock\nlogs/\n*.tmp\n' > "$WM_ROOT/.gitignore"
-  fi
+  printf '%s\n' "$WM_IGNORES" > "$WM_ROOT/.gitignore"
   git -C "$WM_ROOT" add -A
   git -C "$WM_ROOT" commit -q -m "init: working memory skeleton" || true
   echo "Git repo initialized with initial commit."
 else
   git -C "$WM_ROOT" config user.name "Hermes Working Memory"
   git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
-  echo "Git repo already initialized (working tree left untouched)."
+  # Add any MISSING ignore lines (idempotent, never rewrites the file, never
+  # commits — an established repo's pending changes belong to whoever made
+  # them). Existing installs predate the records.db entries.
+  touch "$WM_ROOT/.gitignore"
+  added=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if ! grep -qxF -- "$line" "$WM_ROOT/.gitignore"; then
+      printf '%s\n' "$line" >> "$WM_ROOT/.gitignore"
+      added=$((added + 1))
+    fi
+  done <<EOF
+$WM_IGNORES
+EOF
+  if [ "$added" -gt 0 ]; then
+    echo "Git repo already initialized; added $added missing .gitignore line(s)."
+  else
+    echo "Git repo already initialized (working tree left untouched)."
+  fi
+  # A previously-tracked records.db keeps being committed despite .gitignore,
+  # and a WAL-mode database committed live is torn. Flag it; don't act — an
+  # established repo's history is the user's to change.
+  if git -C "$WM_ROOT" ls-files --error-unmatch records.db >/dev/null 2>&1; then
+    echo
+    echo "  NOTE: records.db is tracked by git. It should not be — the live"
+    echo "  WAL-mode database commits in a torn state, and the consistent copy"
+    echo "  is records-snapshot.db (written nightly). To stop tracking it"
+    echo "  WITHOUT deleting the file:"
+    echo "      git -C $WM_ROOT rm --cached records.db records.db-wal records.db-shm"
+    echo "      git -C $WM_ROOT commit -m 'stop tracking the live SQLite db'"
+    echo
+  fi
 fi
 
 # 3. Install the skill (SYMLINK, like the hook — the package is the single
@@ -75,8 +117,11 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - wm-backup-push.py         -> nightly backup push to the private
 #         remote (watchdog: silent when healthy, alerts on failure)
 #       - records.py                -> v3 structured-records store CLI
+#       - reminders.py              -> v3 reminder store CLI (locked writer)
 #       - todoist.py                -> v3 Todoist mirror helper
-WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py records.py todoist.py"
+#     wmlib.py is NOT wrapped: it is imported by the others from the package
+#     directory, never executed on its own.
+WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py records.py reminders.py todoist.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then

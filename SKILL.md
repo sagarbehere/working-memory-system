@@ -66,7 +66,8 @@ supersedes: 20260817-1610-01
   reference | idea` (v2's `log|reminder|log+reminder` is gone: a capture with
   a due date splits into *two items* — a `record` for the event + a `reminder`
   for the next due, per schema §3.1's habit model).
-- `domain`: 1+ tags from the canonical list at `~/wiki/_meta/tags.md` —
+- `domain`: 1+ tags from the canonical list at `<vault>/_meta/tags.md`
+  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`) —
   classify against it first; coin a new tag only when nothing fits, and add it
   to the list in the same operation (a policy change → refinement log).
 - `status` (`active|superseded|archived`) — project/reference only, default
@@ -85,7 +86,7 @@ and commit `~/working-memory` after the batch):
 
 | `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | write the local entry first — `{id, due_at, message, raw_entry_id, status, origin, mirrored, todoist_id}` — then, in the same operation, call `python3 ~/.hermes/scripts/todoist.py create --content <message> --due <due_at>` (only when `TODOIST_MIRROR_ENABLED=true` in `~/.hermes/working-memory.env` — same gate `reminder-check.py` uses); it prints `{"id": …, …}` on stdout — on success (exit 0) set `mirrored: true` and `todoist_id` to that `id` in the same write. On failure/timeout, leave `mirrored: false` — `reminder-check.py`'s cron tick mirrors it on a later run as a durable catch-up, not the primary path. |
+| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | **ONE command — never hand-edit `reminders.json`:** `python3 ~/.hermes/scripts/reminders.py add --message <text> --due-at <ISO-8601 with offset> --raw-entry-id <id> --origin-platform <p> --origin-chat <id> [--origin-thread <id>]`. It writes the durable local entry, then calls Todoist synchronously and records `todoist_id`/`mirrored: true`, and prints the finished entry as JSON. It takes the store lock, so it is safe against a concurrent cron tick. A failed mirror is not an error — the entry is durable and the cron catches it up. |
 | `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py --root ~/working-memory add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
 | `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
@@ -99,7 +100,7 @@ and commit `~/working-memory` after the batch):
   when natural (no forced minimum).
 - Frontmatter: `type`, `domain`, `status` (where applicable), `subtype`
   (references), `record_kind` (records), `created`/`updated`.
-- **Commit AND push in `~/wiki` after every write** — a local-only commit in a
+- **Commit AND push in the vault (`WM_VAULT_PATH`, default `~/wiki`) after every write** — a local-only commit in a
   sync repo isn't backed up.
 - `records.py` is deterministic — for structured records ALWAYS use it (it
   handles JSON escaping and indexing); never hand-edit `records.db`.
@@ -113,7 +114,8 @@ and commit `~/working-memory` after the batch):
 ## Retrieve (spec §12 — pick the store by what's asked)
 
 - **Reminder queries** ("what's due this week", "did I take it?") → local
-  `reminders.json`, `status: pending`, soonest-first. "Did it get done" →
+  `reminders.py list` (`--status all` for history), soonest-first.
+  "Did it get done" →
   cross-check completion in Todoist. Manual Todoist tasks → answer from Todoist.
 - **Completion history** ("what did I finish last month", "did I get X done?")
   → `todoist.py completed --since YYYY-MM-DD --until YYYY-MM-DD [--project NAME]`
@@ -136,11 +138,17 @@ and commit `~/working-memory` after the batch):
 
 ## Command (run immediately)
 
-- Mis-filed → re-route to the correct store (fix the SQLite row / vault note /
-  Todoist task / raw classification fields).
+- Mis-filed → re-route to the correct store. Use the CLIs, never hand-edits:
+  `records.py update --id N [--type|--domain|--entity|--occurred-at|--notes]
+  [--json '{…}' merges | --replace-json '{…}' overwrites]` for a SQLite row;
+  edit the vault note in place; `reminders.py`/`todoist.py` for the others.
 - Merge/split vault notes → regenerate the named notes from raw.
 - Forget X → **confirm first** (the one destructive action), then strike the
-  raw entry AND deprecate/remove derived artifacts (vault note, rows, task).
+  raw entry AND remove derived artifacts: `records.py delete --id N` (or a
+  filter — run it with `--dry-run` first and show the user what matches),
+  `reminders.py cancel --id`, `todoist.py delete --id`, and the vault note.
+  `delete` refuses to run without `--id` or a filter, so it can never
+  become "delete everything".
 - Ambiguous target → ask, never guess.
 
 ## Consolidation (v3, nightly job + size triggers)
@@ -157,21 +165,26 @@ and commit `~/working-memory` after the batch):
 
 ## Reminders (v3 — local first, Todoist mirrors)
 
+- **`reminders.py` owns `reminders.json` — never edit that file by hand**
+  (the same rule as `records.db`/`records.py`). Two processes write it, you
+  and the cron tick; the CLI takes the lock that makes them safe, and a
+  hand-written edit does not. Commands: `add`, `list [--status …]`,
+  `done --id`, `cancel --id`, `fire-due`.
 - **Local `reminders.json` is the firing fallback and durable record** — the
   cron (`reminder-check.py`) fires only entries WITHOUT a successful mirror.
-- **Todoist (stage 3, config-gated):** mirrored **synchronously at capture
-  time** — right after writing the local entry, the agent calls
-  `todoist.py create` in the same operation and records `todoist_id` /
-  `mirrored: true` on success. If that call fails or is skipped, the
-  `reminder-check.py` cron tick mirrors any pending reminder still missing
-  `todoist_id` on its next run — a durable catch-up, not the primary path.
+- **Todoist (config-gated):** `reminders.py add` mirrors **synchronously at
+  capture time** and records `todoist_id` / `mirrored: true`. If that call
+  fails, the entry is still durable and `reminder-check.py`'s tick mirrors it
+  on a later run — a catch-up, not the primary path.
   `mirrored: true` → **local firing is skipped** — Todoist's notification IS
   the reminder; local fires only when the mirror is absent or failed
-  (Todoist down, token missing, degraded, or the synchronous call never
-  happened). One notification, from the healthy layer.
+  (Todoist down, token missing, degraded). One notification, from the healthy
+  layer.
 - Completion: user checks off in Todoist → reconciliation marks the matching
-  local entry `done` (runs in the reminder-check pass, not the digest — digest
-  is out of scope).
+  local entry `done` (in the reminder-check pass). A mirrored reminder never
+  checked off is aged out after 30 days so it stops being polled forever.
+- "Mark X done" from the user → `reminders.py done --id <id>`; a reminder the
+  user abandons → `reminders.py cancel --id <id>`.
 
 ## Refinement loop
 

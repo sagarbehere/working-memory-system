@@ -6,13 +6,14 @@
 #   - the package (working-memory-system/): source, SKILL.md, hook, scripts
 #     (reminder-check.py, wm-consolidation-gate.py, cron-session-prune.py,
 #     setup.sh, export.sh), spec, tests, backups/, and its .git history
-#   - the data (working-memory/): raw log, topics, tag index, reminders,
+#   - the data (working-memory/): raw log, tag index, reminders, a consistent
+#     records-snapshot.db (restored on the target),
 #     refinement log, and its .git history (point-in-time recovery)
 #   - INSTALL-NOTES.txt: the per-install wiring values from THIS machine
 #
 # Excludes (transient or machine-local, regenerable on the target):
 #   __pycache__/, *.pyc, meta/pending-buffer.json (in-flight capture state),
-#   meta/reminder-check.lock, logs/ (diagnostic trail)
+#   meta/*.lock, logs/ (diagnostic trail), records.db* (live SQLite)
 #
 # No secrets: the bot token lives in ~/.hermes/.env, which is NOT exported.
 #
@@ -41,11 +42,26 @@ tar -C "$(dirname "$PKG_DIR")" -cf - \
     --exclude='__pycache__' --exclude='*.pyc' \
     "$(basename "$PKG_DIR")" | tar -C "$STAGE" -xf -
 
-# 2. Data (with .git history), minus transient state
+# 2a. Consistent SQLite snapshot. The live records.db is WAL-mode, so copying
+#     it (and its -wal/-shm) mid-write ships a torn database. The backup API
+#     produces a consistent file while the live one is only ever read; the
+#     snapshot is what travels, and the target restores from it (step 5 in the
+#     notes below).
+if [ -f "$WM_ROOT/records.db" ]; then
+  python3 "$PKG_DIR/records.py" --root "$WM_ROOT" backup \
+      --out "$WM_ROOT/records-snapshot.db" >/dev/null
+  echo "SQLite snapshot refreshed: records-snapshot.db"
+fi
+
+# 2b. Data (with .git history), minus transient state
 tar -C "$(dirname "$WM_ROOT")" -cf - \
     --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='meta/pending-buffer.json' \
-    --exclude='meta/reminder-check.lock' \
+    --exclude='meta/*.lock' \
+    --exclude='records.db' \
+    --exclude='records.db-wal' \
+    --exclude='records.db-shm' \
+    --exclude='records.db.pre-migrate' \
     --exclude='logs' \
     "$(basename "$WM_ROOT")" | tar -C "$STAGE" -xf -
 
@@ -64,12 +80,16 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "  1) Extract:  tar xzf $(basename "$OUT")"
     echo "  2) Install:  cd working-memory-system && ./setup.sh"
     echo "     (creates the skeleton if missing, symlinks the skill+hook,"
-    echo "      copies the cron helper scripts into ~/.hermes/scripts/ (they"
-    echo "      must NOT be symlinks — Hermes' cron scheduler won't execute"
-    echo "      scripts resolving outside ~/.hermes/), writes"
-    echo "      ~/.hermes/working-memory.env if absent — it will NOT overwrite"
-    echo "      an existing env file. Re-run setup.sh after package updates"
-    echo "      to refresh the script copies.)"
+    echo "      writes wrapper scripts into ~/.hermes/scripts/ that exec the"
+    echo "      package copies — real files, because Hermes' cron scheduler"
+    echo "      refuses scripts resolving outside ~/.hermes/ — and writes"
+    echo "      ~/.hermes/working-memory.env if absent. It will NOT overwrite"
+    echo "      an existing env file.)"
+    echo "  2b) RESTORE THE DATABASE — the archive carries a consistent"
+    echo "      snapshot, not the live WAL-mode file:"
+    echo "        cp ~/working-memory/records-snapshot.db ~/working-memory/records.db"
+    echo "      Then normalise timestamps if this came from an older install:"
+    echo "        python3 records.py --root ~/working-memory migrate"
     echo "  3) EDIT ~/.hermes/working-memory.env for the target machine."
     echo "     Values on the SOURCE machine were:"
     grep -E '^(WM_|#)' "$HERMES_HOME/working-memory.env" 2>/dev/null | sed 's/^/       /' || true

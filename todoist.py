@@ -8,79 +8,136 @@ Project + enable flags: TODOIST_PROJECT / TODOIST_MIRROR_ENABLED in
 ~/.hermes/working-memory.env.
 
 Commands: ensure-project | create | list | close | delete | get
+
+Also importable as a library (reminders.py and reminder-check.py both use it,
+rather than each carrying its own copy of the client): the request helpers
+RAISE ``TodoistError`` / ``TodoistNotConfigured`` instead of calling
+sys.exit, and only main() turns those into exit codes. An earlier version
+exited from inside _req, which is why callers had to duplicate the client.
 """
 import argparse
 import datetime as _dt
 import json
 import os
-import pathlib
 import subprocess
 import sys
 from datetime import timezone
 from urllib.parse import quote
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wmlib  # noqa: E402
+
 API = "https://api.todoist.com/api/v1/"
-HOME = pathlib.Path.home()
-HERMES_HOME = pathlib.Path(os.environ.get("HERMES_HOME") or str(HOME / ".hermes"))
+HERMES_HOME = wmlib.HERMES_HOME
 
 
-def _load_env(path):
-    env = {}
-    try:
-        for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            env[key.strip()] = value.strip()
-    except FileNotFoundError:
-        pass
-    return env
+class TodoistError(RuntimeError):
+    """An API call failed (network, auth, rate limit, bad response)."""
 
 
-def _token():
-    tok = _load_env(HERMES_HOME / ".env").get("TODOIST_API_TOKEN", "").strip()
-    if not tok:
-        print("todoist: TODOIST_API_TOKEN not set in ~/.hermes/.env", file=sys.stderr)
-        sys.exit(2)
-    return tok
+class TodoistNotConfigured(TodoistError):
+    """No API token — Todoist is optional, so callers may treat this as 'skip'."""
 
 
-def _req(method, path, body=None):
+def token(required: bool = True):
+    """The API token, or None when unset and required=False.
+
+    Callers that must stay silent when Todoist simply isn't configured
+    (the nightly backup watchdog) pass required=False and skip; callers
+    that were asked to do Todoist work let the exception propagate.
+    """
+    tok = wmlib.hermes_env().get("TODOIST_API_TOKEN", "").strip()
+    if not tok and required:
+        raise TodoistNotConfigured(
+            "TODOIST_API_TOKEN not set in ~/.hermes/.env")
+    return tok or None
+
+
+def enabled() -> bool:
+    """True when a token exists AND TODOIST_MIRROR_ENABLED=true."""
+    return bool(
+        wmlib.hermes_env().get("TODOIST_API_TOKEN", "").strip()
+        and wmlib.wm_env().get("TODOIST_MIRROR_ENABLED", "false").strip().lower() == "true"
+    )
+
+
+def default_project() -> str:
+    return wmlib.wm_env().get("TODOIST_PROJECT", "Hermes") or "Hermes"
+
+
+def _req(method, path, body=None, tok=None):
     """curl-backed request. Returns parsed JSON, or None for empty bodies (204)."""
     cmd = [
         "curl", "-sf", "-m", "30", "-X", method,
         API + path,
-        "-H", f"Authorization: Bearer {_token()}",
+        "-H", f"Authorization: Bearer {tok or token()}",
     ]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
-        print(f"todoist API {method} {path}: {out.stderr.strip() or out.stdout.strip() or 'curl failed'}",
-              file=sys.stderr)
-        sys.exit(3)
-    return json.loads(out.stdout) if out.stdout.strip() else None
+        raise TodoistError(
+            f"{method} {path}: "
+            f"{out.stderr.strip() or out.stdout.strip() or f'curl exit {out.returncode}'}")
+    try:
+        return json.loads(out.stdout) if out.stdout.strip() else None
+    except json.JSONDecodeError as exc:
+        raise TodoistError(f"{method} {path}: bad JSON response: {exc}") from exc
 
 
-def _projects():
-    return (_req("GET", "projects") or {}).get("results", [])
+def projects(tok=None):
+    return (_req("GET", "projects", tok=tok) or {}).get("results", [])
 
 
-def project_id(name):
-    for p in _projects():
+def project_id(name, tok=None):
+    for p in projects(tok):
         if p.get("name") == name:
             return p["id"]
     return None
 
 
-def ensure_project(name):
-    pid = project_id(name)
+def ensure_project(name, tok=None):
+    pid = project_id(name, tok)
     if pid:
         return pid
-    p = _req("POST", "projects", {"name": name})
+    p = _req("POST", "projects", {"name": name}, tok=tok)
+    if not p or not p.get("id"):
+        raise TodoistError(f"could not create project {name!r}")
     print(f"created project: {name} ({p['id']})", file=sys.stderr)
     return p["id"]
+
+
+def create_task(content, due=None, due_string=None, project=None, parent=None,
+                tok=None, project_id_=None):
+    """Create one task; returns the API's task dict.
+
+    project_id_ lets a batch caller resolve the project once instead of
+    paying a full project list per task.
+    """
+    tok = tok or token()
+    pid = project_id_ or ensure_project(project or default_project(), tok)
+    body = {"content": content, "project_id": pid}
+    if parent:
+        body["parent_id"] = parent
+    if due:
+        body["due_datetime"] = due
+    elif due_string:
+        body["due_string"] = due_string
+    task = _req("POST", "tasks", body, tok=tok)
+    if not task or not task.get("id"):
+        raise TodoistError("task creation returned no id")
+    return task
+
+
+def open_task_ids(tok=None):
+    """Set of ids of all currently-open tasks — ONE request.
+
+    Completion reconciliation used to GET each mirrored task separately on
+    every tick, so cost grew with the number of outstanding reminders and
+    never fell. An id missing from this set is closed or deleted.
+    """
+    tasks = (_req("GET", "tasks", tok=tok) or {}).get("results", [])
+    return {str(t["id"]) for t in tasks if t.get("id")}
 
 
 def main():
@@ -118,25 +175,17 @@ def main():
 
     args = p.parse_args()
 
-    wm_env = _load_env(HERMES_HOME / "working-memory.env")
-    default_project = wm_env.get("TODOIST_PROJECT", "Hermes")
+    default_proj = default_project()
 
     if args.cmd == "ensure-project":
-        print(ensure_project(args.name or default_project))
+        print(ensure_project(args.name or default_proj))
     elif args.cmd == "create":
-        pid = ensure_project(args.project or default_project)
-        body = {"content": args.content, "project_id": pid}
-        if args.parent:
-            body["parent_id"] = args.parent
-        if args.due:
-            body["due_datetime"] = args.due
-        elif args.due_string:
-            body["due_string"] = args.due_string
-        task = _req("POST", "tasks", body)
+        task = create_task(args.content, due=args.due, due_string=args.due_string,
+                           project=args.project or default_proj, parent=args.parent)
         print(json.dumps({"id": task["id"], "content": task["content"],
                           "due": task.get("due"), "completed_at": task.get("completed_at")}))
     elif args.cmd == "list":
-        projects = {p["id"]: p["name"] for p in _projects()}
+        projects_by_id = {p["id"]: p["name"] for p in projects()}
         tasks = (_req("GET", "tasks") or {}).get("results", [])
         if args.project:
             pid = project_id(args.project)
@@ -154,13 +203,13 @@ def main():
                         c.get("content") for c in data.get("results", [])
                         if c.get("content")
                     ]
-                except SystemExit:
+                except TodoistError:
                     t["_comments"] = None  # one failed fetch doesn't kill the list
         for t in sorted(tasks, key=lambda x: (x.get("due") or {}).get("date") or ""):
             due = t.get("due") or {}
             row = {
                 "id": t["id"], "content": t["content"],
-                "project": projects.get(t.get("project_id")),
+                "project": projects_by_id.get(t.get("project_id")),
                 "parent_id": t.get("parent_id"),
                 "completed_at": t.get("completed_at"),
                 "due": due.get("date"),
@@ -178,12 +227,12 @@ def main():
                 row["comments"] = t["_comments"]
             print(json.dumps(row))
     elif args.cmd == "completed":
-        projects = {p["id"]: p["name"] for p in _projects()}
+        projects_by_id = {p["id"]: p["name"] for p in projects()}
         # The API wants full ISO datetimes; date-only returns empty. Convert
-        # YYYY-MM-DD to local-timezone day bounds, expressed in UTC.
-        tz = _dt.datetime.now().astimezone().tzinfo
-        since_utc = _dt.datetime.fromisoformat(args.since).replace(tzinfo=tz).astimezone(timezone.utc).isoformat()
-        until_utc = (_dt.datetime.fromisoformat(args.until).replace(tzinfo=tz, hour=23, minute=59, second=59)
+        # YYYY-MM-DD to configured-timezone day bounds, expressed in UTC.
+        zone = wmlib.tz()
+        since_utc = _dt.datetime.fromisoformat(args.since).replace(tzinfo=zone).astimezone(timezone.utc).isoformat()
+        until_utc = (_dt.datetime.fromisoformat(args.until).replace(tzinfo=zone, hour=23, minute=59, second=59)
                      .astimezone(timezone.utc).isoformat())
         path = ("tasks/completed/by_completion_date" if args.by == "completion"
                 else "tasks/completed/by_due_date")
@@ -208,7 +257,7 @@ def main():
         for t in sorted(items, key=lambda x: x.get("completed_at") or x.get("completed_date") or ""):
             print(json.dumps({
                 "id": t.get("id"), "content": t.get("content"),
-                "project": projects.get(t.get("project_id")),
+                "project": projects_by_id.get(t.get("project_id")),
                 "completed_at": t.get("completed_at") or t.get("completed_date"),
             }))
     elif args.cmd == "close":
@@ -221,7 +270,15 @@ def main():
         t = _req("GET", f"tasks/{args.id}")
         print(json.dumps({"id": t["id"], "content": t["content"],
                           "completed_at": t.get("completed_at")}))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main() or 0)
+    except TodoistNotConfigured as exc:
+        print(f"todoist: {exc}", file=sys.stderr)
+        sys.exit(2)   # distinct code: "not configured", not "call failed"
+    except TodoistError as exc:
+        print(f"todoist API {exc}", file=sys.stderr)
+        sys.exit(3)

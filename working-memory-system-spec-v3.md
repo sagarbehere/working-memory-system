@@ -19,10 +19,11 @@ Capture works identically on every client — Telegram, a web UI (via the api_se
 1. **Capture gate** — a small hook on the base adapter's inbound seam (the shared path every platform's message passes through) that detects working-memory input (Section 2) and buffers it (Section 6) before anything else happens.
 2. **Extraction/tagging pass** — LLM call that reads a flushed buffer, splits it into items, classifies each as capture or question, and for captures produces: freeform tags, entry type, and (if applicable) a reminder directive and/or supersession flag.
 3. **Raw log** — append-only, immutable, timestamped. Ground truth.
-4. **Topic files** — derived, regenerable markdown files, one per recurring subject. Not authoritative; can be rebuilt from the raw log.
-5. **Promotion/consolidation pass** — background job that decides when a tag graduates to its own topic file, and periodically condenses existing topic files.
-6. **Reminder scheduler** — separate from note storage; fires a message at the right time, to the chat where the reminder was captured.
-7. **Retrieval handler** — answers a question by searching tags and topic files, not by the user browsing anything.
+4. **Typed destinations** — the Obsidian vault (project/reference/idea/narrative-record notes) and SQLite (`records.db`, via `records.py`). Derived and regenerable; not authoritative. *(v3 replaced v2's flat `topics/<tag>.md` files with these — see §4.)*
+5. **Promotion/consolidation pass** — background job that routes recurring or important captures into typed notes and periodically condenses the reference-flavoured ones. Gated by `wm-consolidation-gate.py`, which stays silent when there is no work.
+6. **Reminder scheduler** — separate from note storage; fires a message at the right time, to the chat where the reminder was captured. The store is owned by `reminders.py` (§9).
+7. **Retrieval handler** — answers a question by searching the right store (§12), not by the user browsing anything.
+8. **Deterministic layer** — `wmlib.py` (env, timezone, logging, locking) plus the CLIs above. The agent never hand-edits `reminders.json` or `records.db`; both have a tool, and the tools hold the locks.
 
 ---
 
@@ -76,29 +77,29 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
     2026-08.md              # one file per month, append-only
     2026-09.md
     archive/                 # rotated-out raw files older than the retention window (Section 10)
-  topics/
-    vitamin-d.md
-    printer.md
-    contacts.md
-    ...
-  reminders.json             # active scheduled reminders
+  reminders.json             # local reminder store — written ONLY via reminders.py (§9)
+  records.db                 # structured records, SQLite/WAL — written ONLY via records.py
+  records-snapshot.db        # nightly consistent copy of records.db; THIS is what git tracks
+  todoist-export.jsonl       # nightly export of open Todoist tasks
   logs/
     2026-08.log               # one file per month — diagnostic, not memory (Section 11)
   meta/
     tag-index.json           # tag -> list of raw entry ids, + occurrence counts
     pending-buffer.json      # unflushed per-chat message buffer (Section 11)
     lanes.json               # reserved chats (Section 2)
+    reminders.lock           # flock serialising the agent and the cron tick (§9)
     refinement-log.md        # curated patterns worth reviewing (Section 17)
 ```
 
 **v3 change:** `topics/<tag>.md` flat files are left behind (implementation guide §2) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
 
 - Raw log files are **never edited**, only appended to. Rotate monthly.
-- Topic files ARE edited/rewritten by the consolidation pass — they're a cache, not history.
 - `tag-index.json` lets the agent find "which raw entries mention X" without re-reading every raw file.
 - `logs/` records operational events — distinct from `raw/`, which records *content*.
 - **Everything durable lives under this single `/working-memory/` directory.** A full backup is just archiving this one folder.
-- **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery. No off-box copy is specified at this layer by default — if losing the VPS entirely is a concern, add one (periodic push to a private remote, or a cron `tar`+`scp`/rclone).
+- **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (implementation guide §5).
+- **`records.db` and its `-wal`/`-shm` files are gitignored, deliberately.** A WAL-mode database committed live is torn, and swapping the file under open connections corrupts it — so the tracked artifact is `records-snapshot.db`, written by `sqlite3`'s backup API while the live database is only ever read. Restore with `cp records-snapshot.db records.db` with the gateway stopped.
+- **Timestamps:** everything stored for comparison is normalised to UTC (`records.occurred_at`, reminder `due_at` retains its offset but is compared as an aware datetime); everything user-facing is rendered in `WM_TZ`, defaulting to the machine's zone. No component hardcodes an offset.
 
 ---
 
@@ -184,9 +185,11 @@ Fully reversible — derived content regenerates from the raw log, so "that's mi
 
 Separate mechanism from note storage. Built on the VPS's existing cron and Hermes's existing messaging integration — no new scheduler daemon. **Two layers (v3):**
 
-- **Local store (`reminders.json`)** — the source of truth for *firing* and the durable fallback: flat list of `{id, due_at, message, raw_entry_id, status, origin: {platform, chat_id, thread_id?}}`. A cron entry checks this file and, for any due entry, sends the message to the reminder's **origin** — the chat where it was captured; if that address is unreachable (e.g. a deleted chat), it falls back to a configured home channel. Overdue pendings fire as soon as the VPS is back up. On firing, mark `status: fired`. If Todoist is down, degraded, or removed, reminders keep working unchanged from here.
-- **Todoist (mirror / UI layer)** — every reminder Hermes creates is also written to Todoist **synchronously, at capture time**: the agent calls `todoist.py create` right after writing the local entry, in the same operation, and records `todoist_id`/`mirrored: true` on success. If that call fails or is skipped, `reminder-check.py`'s cron tick retries the mirror for any pending reminder still missing `todoist_id` — a durable catch-up, not the primary path. Todoist provides cross-device visibility, the mobile apps, and notifications; it does **not** gate firing. Completion is reconciled back: the user checks tasks off in Todoist, and the daily digest run marks the matching local entry `done`.
-- **Consistency contract:** write local first (durable), then mirror to Todoist; on drift, Todoist's completion state wins for done-ness, the local store wins for firing. Reconcile during the daily digest (schema §11). Tasks created manually in Todoist (not by Hermes) are visible to the digest but have no local mirror entry.
+- **Local store (`reminders.json`)** — the source of truth for *firing* and the durable fallback: flat list of `{id, due_at, message, raw_entry_id, status, origin: {platform, chat_id, thread_id?}, mirrored, todoist_id, created_at}`. Status is one of `pending | fired | done | cancelled`. A cron entry checks this file and, for any due entry, sends the message to the reminder's **origin** — the chat where it was captured; if that address is unreachable (e.g. a deleted chat), it falls back to a configured home channel. Overdue pendings fire as soon as the VPS is back up. On firing, mark `status: fired`. If Todoist is down, degraded, or removed, reminders keep working unchanged from here.
+- **`reminders.py` owns the file (added 2026-08-29).** The store has two independent writers — the agent at capture time, and the cron tick — so it gets a deterministic CLI exactly as structured records get `records.py`, and the same rule: never hand-edit `reminders.json`. Every mutation takes `meta/reminders.lock`, which both writers share. The tick previously held a lock the agent knew nothing about, so it serialised tick-against-tick but not against the writer it actually raced: a capture landing between the tick's read and its write-back was silently erased, and the tick's critical section spans Todoist network calls.
+- **Todoist (mirror / UI layer)** — every reminder Hermes creates is also written to Todoist **synchronously, at capture time**: `reminders.py add` writes and fsyncs the durable local entry FIRST, then makes the Todoist call **outside the lock** (a hung API must not block a capture), then patches `todoist_id`/`mirrored: true` in under a fresh lock. A crash mid-mirror therefore leaves a durable un-mirrored reminder, never a lost one. If the call fails or is skipped, `reminder-check.py`'s tick mirrors any pending reminder still missing `todoist_id` — a catch-up, not the primary path. Todoist provides cross-device visibility, the mobile apps, and notifications; it does **not** gate firing.
+- **Reconciliation and its horizon.** The tick fetches all open Todoist task ids in ONE request and treats any mirrored reminder no longer in that set as completed (this was one GET per mirrored reminder per tick, so cost grew with the backlog and never fell). A mirrored reminder stays `pending` locally until checked off in Todoist, so one never-completed task would be polled forever; after 30 days past due it is aged out to `fired` and stops being polled.
+- **Consistency contract:** write local first (durable), then mirror to Todoist; on drift, Todoist's completion state wins for done-ness, the local store wins for firing. Tasks created manually in Todoist (not by Hermes) have no local mirror entry.
 - Recurring reminders should regenerate their next `due_at` automatically once the agent recognizes the pattern (nice-to-have, not required).
 
 ---

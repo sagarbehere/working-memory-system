@@ -29,49 +29,30 @@ import os
 import re
 import sys
 
-HERMES_HOME = os.path.expanduser(
-    os.environ.get("HERMES_HOME") or "~/.hermes"
-)
-ENV_PATH = os.path.join(HERMES_HOME, "working-memory.env")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wmlib  # noqa: E402
+
+ENV_PATH = str(wmlib.HERMES_HOME / "working-memory.env")
 DEFAULT_ROOT = os.path.expanduser("~/working-memory")
 
-
-def load_env(path: str) -> dict:
-    env = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                env[k.strip()] = v.strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return env
+load_env = wmlib.load_env_file
+# Timestamps are parsed in the CONFIGURED zone, not a hardcoded UTC+05:30.
+# The gate used to bake in +05:30 while reminder-check used the system zone,
+# so the two disagreed about "now" on any machine outside India — and this
+# package ships an export.sh for installing on other machines.
+parse_dt = wmlib.parse_iso
 
 
-def parse_dt(s: str):
-    """Parse ISO timestamp from raw entries or log lines; ALWAYS returns an
-    aware datetime (tz-naive input is assumed to be local, UTC+05:30)."""
-    if not s:
-        return None
-    s = s.strip()
-    try:
-        dt = _dt.datetime.fromisoformat(s)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
-    return dt
+def read_log_entries(root: str) -> list:
+    """Every parseable log line, once.
 
-
-def last_consolidation_ts(root: str):
-    """Latest consolidation-event timestamp across logs/YYYY-MM.log."""
-    latest = None
+    last_consolidation_ts and health_issues each used to walk and json-parse
+    the whole logs/ directory independently. One pass feeds both.
+    """
+    entries = []
     logs_dir = os.path.join(root, "logs")
     if not os.path.isdir(logs_dir):
-        return None
+        return entries
     for fn in sorted(os.listdir(logs_dir)):
         if not re.match(r"\d{4}-\d{2}\.log$", fn):
             continue
@@ -82,17 +63,22 @@ def last_consolidation_ts(root: str):
                     if not line:
                         continue
                     try:
-                        obj = json.loads(line)
+                        entries.append(json.loads(line))
                     except Exception:
                         continue
-                    if obj.get("component") == "consolidation" and obj.get(
-                        "event"
-                    ) == "consolidation":
-                        ts = parse_dt(str(obj.get("ts", "")))
-                        if ts and (latest is None or ts > latest):
-                            latest = ts
         except OSError:
             continue
+    return entries
+
+
+def last_consolidation_ts(entries: list):
+    """Latest consolidation-event timestamp among already-read log entries."""
+    latest = None
+    for obj in entries:
+        if obj.get("component") == "consolidation" and obj.get("event") == "consolidation":
+            ts = parse_dt(str(obj.get("ts", "")))
+            if ts and (latest is None or ts > latest):
+                latest = ts
     return latest
 
 
@@ -182,39 +168,23 @@ def pending_approvals(root: str) -> int:
         return 0
 
 
-def health_issues(root: str, since) -> list:
+def health_issues(root: str, since, entries: list) -> list:
     """Operational health checks — return real problems only (silent when healthy).
 
     Local-only by design: the gate never calls external APIs. Mirror/reconcile
-    failures surface here via the log lines reminder-check already writes.
+    failures surface here via the log lines the other components already write.
     """
     issues = []
 
     # 1. Failure log-lines since the last consolidation (component/event -> n)
     fail_counts = {}
-    logs_dir = os.path.join(root, "logs")
-    if os.path.isdir(logs_dir):
-        for fn in sorted(os.listdir(logs_dir)):
-            if not re.match(r"\d{4}-\d{2}\.log$", fn):
-                continue
-            try:
-                with open(os.path.join(logs_dir, fn)) as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except Exception:
-                            continue
-                        ts = parse_dt(str(obj.get("ts", "")))
-                        if since is not None and ts and ts <= since:
-                            continue
-                        if obj.get("outcome") in ("failed", "retry", "unfiled-fallback"):
-                            key = (obj.get("component", "?"), obj.get("event", "?"))
-                            fail_counts[key] = fail_counts.get(key, 0) + 1
-            except OSError:
-                continue
+    for obj in entries:
+        ts = parse_dt(str(obj.get("ts", "")))
+        if since is not None and ts and ts <= since:
+            continue
+        if obj.get("outcome") in ("failed", "retry", "unfiled-fallback"):
+            key = (obj.get("component", "?"), obj.get("event", "?"))
+            fail_counts[key] = fail_counts.get(key, 0) + 1
     for (comp, ev), n in sorted(fail_counts.items()):
         issues.append(f"{comp} {ev}: {n} failure(s) since last consolidation")
 
@@ -228,9 +198,11 @@ def health_issues(root: str, since) -> list:
                 r.get("id") for r in reminders
                 if r.get("mirrored") and not r.get("todoist_id")
             ]
+            # Kept in step with reminders.STATUSES — 'cancelled' was missing
+            # here, so every cancelled reminder was reported as an anomaly.
             unknown_status = [
                 r.get("id") for r in reminders
-                if r.get("status") not in ("pending", "fired", "done")
+                if r.get("status") not in ("pending", "fired", "done", "cancelled")
             ]
             if inconsistent:
                 issues.append("reminders marked mirrored but missing todoist_id: "
@@ -267,13 +239,14 @@ def main() -> int:
     except ValueError:
         retention = 90
 
-    now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+    now = wmlib.now(env)
     if not os.path.isdir(root):
         # Fail open: if we can't assess state, let the agent run and report.
         print("WM gate: WM_ROOT missing (%s) — consolidation cannot proceed; check the working-memory setup." % root)
         return 0
 
-    since = last_consolidation_ts(root)
+    entries = read_log_entries(root)
+    since = last_consolidation_ts(entries)
     new_count, newest = raw_entries_since(root, since)
     rot = files_due_for_rotation(root, retention, now)
     logs = logs_due_for_deletion(root, 30, now)
@@ -300,7 +273,7 @@ def main() -> int:
         print("Consolidation work detected:")
         print("\n".join(lines))
 
-    health = health_issues(root, since)
+    health = health_issues(root, since, entries)
     if health:
         print("Health issues detected:")
         for h in health:
