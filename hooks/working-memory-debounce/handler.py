@@ -1,44 +1,47 @@
-"""Working-memory v2 capture gate hook (markers + reserved lanes).
+"""Working-memory capture gate hook (markers + reserved lanes).
 
 Installed at ~/.hermes/hooks/working-memory-debounce/ and loaded by the
 gateway's HookRegistry at startup (gateway/run.py -> gateway/hooks.py).
 
-v2 (spec Section 18): the gate lives on the BASE adapter's inbound seam
-(``BasePlatformAdapter.handle_message``), so it sees messages from every platform
-(Telegram, api_server / Open WebUI, etc.), not just Telegram. Three
-inputs qualify as working-memory input:
+This hook is carried over from the v2.0.0 line largely unchanged, per
+the implementation guide's "reuse as-is" instruction for the capture
+gate — see working-memory-system-spec-v3.md, "Scope boundary" and
+"Capture flow". It lives on the BASE adapter's inbound seam
+(``BasePlatformAdapter.handle_message``), so it sees messages from every
+platform (Telegram, api_server / Open WebUI, etc.), not just Telegram.
+Three inputs qualify as working-memory input:
 
-  1. Reservation / unreservation phrases ("reserve this chat for working
-     memory" / "unreserve this chat") — recorded in ``meta/lanes.json``
-     and passed through to the agent (skill auto-loaded) so the
-     confirmation reply goes out through the platform-correct send path.
+  1. Reservation / unreservation phrases ("reserve for memory" /
+     "release for memory") — recorded in ``meta/lanes.json`` and passed
+     through to the agent (skill auto-loaded) so the confirmation reply
+     goes out through the platform-correct send path.
   2. A reserved lane — a chat previously reserved in-band (or the legacy
      env-var lane) where the marker is implied.
   3. A marker — a message starting with ``Hey memory`` or ``note``
-     (case-insensitive, word-boundary; spec Section 18.2).
+     (case-insensitive, word-boundary).
 
-Markers and lane messages are buffered with a debounce before being
-flushed as ONE agent turn (markers: short 5s; reserved lanes: 25s, the
-v1 default), stamped with ``auto_skill`` so the working-memory skill
-loads deterministically. The marker is deliberately LEFT in the text:
-the skill's scope guard needs to see it to route the message, and the
-skill strips it at extraction time (spec Section 18.2) so it never
-appears in a raw entry.
+Markers and lane messages are buffered with a single debounce
+(``WM_DEBOUNCE_SECONDS``, default 5s) before being flushed as ONE agent
+turn, stamped with ``auto_skill`` so the working-memory skill loads
+deterministically. (An earlier design considered a separate, longer
+debounce for reserved lanes; that idea was abandoned — there is only
+ever the one timer.) The marker is deliberately LEFT in the text: the
+skill's scope guard needs to see it to route the message, and the skill
+strips it at extraction time so it never appears in a raw entry.
 
 Everything else falls through to the original handler untouched
 (no-op default) — the gate costs one string prefix check + one
-in-memory set lookup per message (spec Section 18.8).
+in-memory dict lookup per message.
 
-Crash recovery (spec Section 10): every buffered chunk is persisted to
+Crash recovery: every buffered chunk is persisted to
 ``meta/pending-buffer.json``; buffers are re-armed lazily on the next
 gateway start, keyed by lane (rebuilt from the stored source), so a
 thought is never dropped.
 
-Lane persistence (spec Section 18.3/18.5): ``meta/lanes.json`` is a
-small, git-backed dict of reserved lanes (lane key -> record). It is
-self-populating — entries only ever come from explicit in-chat
-reservation phrases, plus the legacy env-var seed below. Never edited by
-hand.
+Lane persistence: ``meta/lanes.json`` is a small, git-backed dict of
+reserved lanes (lane key -> record). It is self-populating — entries
+only ever come from explicit in-chat reservation phrases, plus the
+legacy env-var seed below. Never edited by hand.
 """
 
 import asyncio
@@ -85,10 +88,10 @@ LANES_FILE = WM_ROOT / "meta" / "lanes.json"
 
 # Markers — primary + short alias. Matched case-insensitively at message
 # start, followed by whitespace / punctuation / end (word boundary, so
-# "notebook" never matches "note"). Spec Section 18.2.
+# "notebook" never matches "note"). See spec: Scope boundary.
 MARKERS = ("hey memory", "note")
 # Reservation phrases — exactly two, symmetric, dictionary words
-# (spec 18.3; "release" is the spellchecker-clean pair for "reserve").
+# ("release" is the spellchecker-clean pair for "reserve").
 # Case-insensitive; trailing words tolerated ("release for memory please").
 RESERVE_PHRASE = "reserve for memory"
 RELEASE_PHRASE = "release for memory"
@@ -133,8 +136,8 @@ def _load_lanes() -> dict:
     """lane key -> record, from lanes.json plus the legacy env-var seed.
 
     The env-var lane (WM_TELEGRAM_CHAT_ID / WM_TELEGRAM_THREAD_ID) is
-    treated as one pre-reserved lane so v1 setups keep working unchanged
-    (spec Section 18.5 — legacy seed, droppable once reservations are in
+    treated as one pre-reserved lane so pre-reservation setups keep
+    working unchanged (legacy seed, droppable once reservations are in
     use).
     """
     lanes = {}
@@ -201,7 +204,7 @@ def _parse_marker(text) -> "str | None":
     """Return the matched marker token, or None.
 
     Word-boundary rule: the marker must be followed by whitespace,
-    punctuation, or end-of-message (spec Section 18.2).
+    punctuation, or end-of-message.
     """
     if not text:
         return None
@@ -346,8 +349,8 @@ def install_patches() -> None:
 
         # 1. Reservation / unreservation — record, then pass through so
         #    the agent replies with the confirmation via the normal,
-        #    platform-correct send path (spec 18.3; hook-side reply is a
-        #    future optimization).
+        #    platform-correct send path (hook-side reply is a future
+        #    optimization).
         action = _reservation_action(text)
         if action:
             _record_reservation(event.source, action)
@@ -378,7 +381,7 @@ def install_patches() -> None:
 
         event.auto_skill = WM_SKILL  # deterministic skill injection on new sessions
         # Marker stays visible — the skill's scope guard routes on it and
-        # the extraction pass strips it before filing (spec 18.2/18.3).
+        # the extraction pass strips it before filing.
 
         existing = self._wm_buffers.get(key)
         if existing is None:
@@ -479,7 +482,7 @@ def install_patches() -> None:
         print(
             f"[hooks] {HOOK_NAME}: loaded but no lanes reserved — marker mode "
             f"only ({WM_SKILL}); reserve a chat with "
-            f"'{RESERVE_PHRASE}' (spec Section 18)",
+            f"'{RESERVE_PHRASE}'",
             flush=True,
         )
     else:
