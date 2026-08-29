@@ -12,11 +12,10 @@ while keeping full agent-driven consolidation on nights with real work.
 
 Work signals checked (all file-based, read-only):
   1. raw entries newer than the last logged consolidation run
-  2. topic files exceeding WM_CONDENSE_SIZE
-  3. raw month files older than WM_RAW_RETENTION_DAYS (rotation due)
-  4. log files older than 30 days (deletion due)
-  5. refinement-log entries with STATUS: PENDING APPROVAL
-  6. OPERATIONAL HEALTH (v3, added 2026-08-28): reminder-send failures,
+  2. raw month files older than WM_RAW_RETENTION_DAYS (rotation due)
+  3. log files older than 30 days (deletion due)
+  4. refinement-log entries with STATUS: PENDING APPROVAL
+  5. OPERATIONAL HEALTH (v3, added 2026-08-28): reminder-send failures,
      todoist mirror/reconcile failures, extraction fallbacks since the last
      consolidation; reminders.json anomalies (mirrored-without-id, unknown
      status); records.db integrity. Emitted as a separate "Health issues"
@@ -122,23 +121,6 @@ def raw_entries_since(root: str, since):
         except OSError:
             continue
     return count, newest
-
-
-def oversized_topics(root: str, limit: int):
-    out = []
-    topics_dir = os.path.join(root, "topics")
-    if not os.path.isdir(topics_dir):
-        return out
-    for fn in sorted(os.listdir(topics_dir)):
-        if not fn.endswith(".md"):
-            continue
-        try:
-            size = os.path.getsize(os.path.join(topics_dir, fn))
-        except OSError:
-            continue
-        if size > limit:
-            out.append((fn, size))
-    return out
 
 
 def files_due_for_rotation(root: str, retention_days: int, now):
@@ -281,10 +263,6 @@ def main() -> int:
     env = load_env(ENV_PATH)
     root = os.path.expanduser(env.get("WM_ROOT", DEFAULT_ROOT))
     try:
-        condense_size = int(env.get("WM_CONDENSE_SIZE", "2500"))
-    except ValueError:
-        condense_size = 2500
-    try:
         retention = int(env.get("WM_RAW_RETENTION_DAYS", "90"))
     except ValueError:
         retention = 90
@@ -297,7 +275,6 @@ def main() -> int:
 
     since = last_consolidation_ts(root)
     new_count, newest = raw_entries_since(root, since)
-    topics = oversized_topics(root, condense_size)
     rot = files_due_for_rotation(root, retention, now)
     logs = logs_due_for_deletion(root, 30, now)
     pend = pending_approvals(root)
@@ -312,8 +289,6 @@ def main() -> int:
                 (" (newest %s)" % newest.isoformat()) if newest else "",
             )
         )
-    for fn, size in topics:
-        lines.append("- topic '%s' is %d bytes (limit %d) — condense" % (fn, size, condense_size))
     for fn in rot:
         lines.append("- raw/%s older than %dd retention — rotate to raw/archive/" % (fn, retention))
     for fn in logs:
