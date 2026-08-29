@@ -1,4 +1,4 @@
-"""Unit tests for reminder origin resolution (spec 18.4). No network.
+"""Unit tests for reminder origin resolution (spec: Reminder scheduler). No network.
 
 Run: python3 tests/test_reminder_resolver.py  (from the package dir)
 """

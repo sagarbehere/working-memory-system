@@ -7,11 +7,12 @@ Two delivery modes:
   crontab.example). Reads $WM_ROOT/reminders.json, fires every pending
   reminder whose due_at has passed — including any that came due while the
   machine was down — and sends it via the existing Hermes Telegram bot into
-  the reminder's origin chat (the chat where it was captured — spec Section
-  18.4), falling back to the legacy working-memory lane
-  (WM_TELEGRAM_CHAT_ID / THREAD_ID, spec Section 2/9) when the origin is
-  missing or not deliverable by this script. A failed send is never marked
-  fired; it stays pending and retries on the next tick (spec Section 11).
+  the reminder's origin chat (the chat where it was captured — spec:
+  Reminder scheduler), falling back to the legacy working-memory lane
+  (WM_TELEGRAM_CHAT_ID / THREAD_ID, spec: Scope boundary / Reminder
+  scheduler) when the origin is missing or not deliverable by this
+  script. A failed send is never marked fired; it stays pending and
+  retries on the next tick (spec: Error handling & crash recovery).
   Every fire attempt is logged to $WM_ROOT/logs/YYYY-MM.log (JSON lines).
 
 * stdout mode (no Telegram): if TELEGRAM_BOT_TOKEN or
@@ -136,7 +137,7 @@ def _git_commit(wm_root, fired, failed, mirrored=(), reconciled=()):
 
 
 def _resolve_target(reminder, default_chat, default_thread):
-    """Pick the delivery address for a reminder (spec Section 18.4).
+    """Pick the delivery address for a reminder (spec: Reminder scheduler).
 
     Origin (platform + chat_id + thread_id) is recorded at capture time
     by the agent. Telegram origins deliver directly; anything else (or a
@@ -147,7 +148,7 @@ def _resolve_target(reminder, default_chat, default_thread):
     platform = origin.get("platform") or "telegram"
     if platform != "telegram":
         # Non-Telegram origins are not deliverable by this standalone
-        # script yet — home-channel fallback (spec 18.4/18.6).
+        # script yet — home-channel fallback (spec: Reminder scheduler).
         return default_chat, default_thread, True
     if origin.get("chat_id"):
         return origin.get("chat_id"), origin.get("thread_id") or default_thread, False

@@ -127,8 +127,9 @@ fi
 
 echo
 echo "== Next steps =="
-echo "1) v2 is marker-first (spec Section 18): capture works anywhere with"
-echo "   zero config — start a message with 'Hey memory' or 'note'."
+echo "1) Capture is marker-first: works anywhere with zero config — start a"
+echo "   message with 'Hey memory' or 'note' (see working-memory-system-spec-v3.md,"
+echo "   Scope boundary)."
 echo "2) Optional frictionless lane: set WM_TELEGRAM_CHAT_ID (+ THREAD_ID)"
 echo "   in $HERMES_HOME/working-memory.env as a legacy seed, OR reserve a"
 echo "   chat in-band with 'reserve for memory' (any platform; release"

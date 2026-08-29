@@ -1,4 +1,4 @@
 name: working-memory-debounce
-description: "Working-memory capture gate: buffers messages from reserved lanes or with the markers 'Hey memory'/'note' and flushes them as one agent turn; handles in-chat lane reservation; persists pending buffers for crash recovery. Part of the working-memory system (v2, spec Section 18)."
+description: "Working-memory capture gate: buffers messages from reserved lanes or with the markers 'Hey memory'/'note' and flushes them as one agent turn; handles in-chat lane reservation; persists pending buffers for crash recovery. Part of the working-memory system (v3.0.0); carried over from the v2.0.0 line largely unchanged, per working-memory-system-spec-v3.md."
 events:
   - gateway:startup

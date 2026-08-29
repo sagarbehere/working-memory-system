@@ -1,4 +1,4 @@
-"""Unit tests for the v2 capture-gate pure logic (no gateway required).
+"""Unit tests for the capture-gate pure logic (no gateway required).
 
 Run: python3 tests/test_gate.py   (from the package dir)
 """
