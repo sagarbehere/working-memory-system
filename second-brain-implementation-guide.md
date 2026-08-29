@@ -58,6 +58,14 @@ Canonical rules: `second-brain-schema.md` §10. Only the decisions here:
   which is why the nightly watchdog checks for unpushed vault commits.
 - **Todoist needs no backup infrastructure** beyond a nearly-free nightly
   export, being reasonably trusted hosted infrastructure.
+- **The canonical domain-tag list lives in the vault (`_meta/tags.md`), not in
+  `/working-memory/meta/`.** It is already git-backed and synced to every
+  device there, and it is content the user reads and edits — one fewer thing
+  for the backup push to cover. This decision matters because the vocabulary
+  and the raw-log index were once considered for the same home, and the names
+  still invite confusion: `_meta/tags.md` is the **vocabulary** (which tags
+  may be used); `meta/tag-index.json` was an **inverted index** (which raw
+  entries mention a tag). Different jobs, different files, different repos.
 
 ---
 
