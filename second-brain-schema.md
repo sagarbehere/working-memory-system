@@ -8,7 +8,7 @@ plain folders, a wiki, a notes app, or nothing but a text file.
 
 **What it is not.** Not a description of any particular system. The
 working-memory system in this repository is *one* application of it; for how
-that system files things concretely, see `working-memory-system-spec-v3.md`.
+that system files things concretely, see `working-memory-system-spec.md`.
 If you find a tool name in the sections below, that is a bug in this document.
 
 *Type: Reference (evergreen — status: active)*

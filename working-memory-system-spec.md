@@ -329,6 +329,27 @@ Goal: let Hermes notice when SKILL.md or the underlying design has a gap, withou
 
 ## 18. Versioning note
 
-This document (`working-memory-system-spec-v3.md`) is the **v3.0.0** branch's own copy of the spec, forked from the **v2.0.0** tag — the version tagged and frozen for the current public release, including existing Reddit users, who can rely on `working-memory-system-spec.md` at that tag not changing further.
+`main` is **v4.0.0**. The line so far:
 
-v3.0.0 reuses and adapts the plumbing in Sections 1-17 above rather than rebuilding it, and may continue to evolve this document independently of v2.0.0 as the branch develops. It's paired with `second-brain-schema.md` (the type/tag/status classification model) and `decisions.md` (build order, storage routing, backup plan) — together, the three documents that describe v3.0.0 in full. A v3.0.0 install is never affected by changes to the frozen v2.0.0 tag, and vice versa.
+- **v2.0.x** — tagged and frozen. Capture, debounce and a local reminder cron,
+  with topic files as the storage model. Anyone still running it is unaffected
+  by anything on `main`; its spec is preserved at those tags.
+- **v3.0.0** — the second-brain rework: five types, domain tags, notes routed
+  into an Obsidian vault, structured records in SQLite, and a two-layer
+  reminder scheduler with Todoist mirroring a local store.
+- **v4.0.0** — the simplification. The local reminder store, the SQLite
+  records store, and the nightly consolidation job were removed; the raw log
+  became a plain verbatim transcript; Todoist became the sole reminder
+  mechanism. Roughly half the code, and no scheduled job that invokes the
+  agent. The reasoning is in `decisions.md`; the deleted code is recoverable
+  from the tag `v3.0.0-full`.
+
+The version filename suffix is gone. `working-memory-system-spec-v3.md`
+existed only while the v2 and v3 specs coexisted on one branch; v2's copy is
+frozen at its tags, so the unversioned name is correct again — and a spec
+whose filename encodes its version has to be renamed, with every cross
+reference updated, on every bump.
+
+Paired documents: `second-brain-schema.md` (the classification model, written
+to stand alone) and `decisions.md` (why things are as they are, and what was
+deliberately not built).

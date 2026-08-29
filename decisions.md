@@ -1,4 +1,4 @@
-# Second Brain — Decisions & Rejected Alternatives (v3.0.0)
+# Second Brain — Decisions & Rejected Alternatives
 
 **What this document is for.** Everything here is knowledge you cannot recover
 by reading the code: choices that were made deliberately, alternatives that
@@ -8,7 +8,7 @@ still exists.
 
 **What it is NOT.** Not a description of how the system works — that drifts,
 and the code is the truth. Data model: `second-brain-schema.md`. Plumbing:
-`working-memory-system-spec-v3.md`. Orientation for coding agents:
+`working-memory-system-spec.md`. Orientation for coding agents:
 `CLAUDE.md`. This was a full implementation guide until 2026-08-29; the
 descriptive half was cut because it had started contradicting the code, as
 the two corrections below show.

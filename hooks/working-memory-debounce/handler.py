@@ -3,10 +3,9 @@
 Installed at ~/.hermes/hooks/working-memory-debounce/ and loaded by the
 gateway's HookRegistry at startup (gateway/run.py -> gateway/hooks.py).
 
-This hook is carried over from the v2.0.0 line largely unchanged, per
-the implementation guide's "reuse as-is" instruction for the capture
-gate — see working-memory-system-spec-v3.md, "Scope boundary" and
-"Capture flow". It lives on the BASE adapter's inbound seam
+This is the one component carried through every version of the system
+largely unchanged — see working-memory-system-spec.md, "Scope boundary"
+and "Capture flow". It lives on the BASE adapter's inbound seam
 (``BasePlatformAdapter.handle_message``), so it sees messages from every
 platform (Telegram, api_server / Open WebUI, etc.), not just Telegram.
 Three inputs qualify as working-memory input:

@@ -48,7 +48,7 @@ REMOVED = {
 ALLOWED = {
     "tests/test_no_vestigial_refs.py": "*",     # this file lists them
     "decisions.md": "*",  # records WHY they went
-    "working-memory-system-spec-v3.md": "*",    # §9 records why the layer went
+    "working-memory-system-spec.md": "*",    # §9 records why the layer went
     "review-notes.md": "*",                     # dated decision log; history
     # These must NAME the removed things in order to check they are absent, or
     # to tell the user to clean them up.
@@ -85,7 +85,7 @@ def tracked_files():
     return [f for f in out.stdout.splitlines() if f.strip()]
 
 
-DOC_FOR = {"schema": "second-brain-schema.md", "spec": "working-memory-system-spec-v3.md"}
+DOC_FOR = {"schema": "second-brain-schema.md", "spec": "working-memory-system-spec.md"}
 
 
 def sections_in(doc):

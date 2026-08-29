@@ -1,7 +1,7 @@
 ---
 name: working-memory
 description: "Use for the working-memory system (second brain): input in a reserved lane or starting with 'Hey memory'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
-version: 3.0.0
+version: 4.0.0
 author: Sagar Behere
 license: MIT
 metadata:
@@ -22,7 +22,7 @@ tasks); nothing is ever rebuilt from the transcript, and recovery is the
 backups' job (the vault's own remote, the nightly push, the Todoist export).
 
 **Read before operating:** `second-brain-schema.md` (the type/tag/status model
-— read this first), `working-memory-system-spec-v3.md` (how this system files
+— read this first), `working-memory-system-spec.md` (how this system files
 those types, §5a), `decisions.md` (why, and what is deliberately absent), then
 `logs/` (what actually happened).
 
@@ -211,7 +211,7 @@ Approval boundary:
 ## Escalation
 
 Not clearly covered? Consult in order: `second-brain-schema.md` (what kind of
-thing is this?) → `working-memory-system-spec-v3.md` §5a (where does that kind
+thing is this?) → `working-memory-system-spec.md` §5a (where does that kind
 of thing go here?) → `decisions.md` (why is it this way, and what was
 deliberately not built?) → `logs/` (what happened on a past run). SKILL.md is
 git-versioned on `main`, so every accepted refinement is diffable and

@@ -225,7 +225,7 @@ python3 tests/run_all.py    # 8 suites, no network, no live data touched
 
 - [`second-brain-schema.md`](second-brain-schema.md) — the information model.
   Tool-independent; the most reusable thing here.
-- [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md) — how
+- [`working-memory-system-spec.md`](working-memory-system-spec.md) — how
   this system works, in English.
 - [`decisions.md`](decisions.md) — decisions made, alternatives rejected, and
   things deliberately *not* built. Read this before adding anything.

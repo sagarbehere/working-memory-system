@@ -47,7 +47,7 @@ Design docs, in the order worth reading:
 
 1. `second-brain-schema.md` — the type/tag/status model. Start here; it
    explains *why* captures are classified the way they are.
-2. `working-memory-system-spec-v3.md` — the plumbing: storage layout, capture
+2. `working-memory-system-spec.md` — the plumbing: storage layout, capture
    flow, reminder scheduler, error handling.
 3. `decisions.md` — decisions and rejected
    alternatives: why things are as they are, and what is absent on purpose.
