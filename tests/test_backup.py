@@ -34,6 +34,30 @@ def git(repo, *args):
                           capture_output=True, text=True)
 
 
+def init_bare(path):
+    """A bare repo whose HEAD points at main, whatever git's default is.
+
+    Without the symbolic-ref, a host with init.defaultBranch=master (the git
+    default before 2.28, and still unset on many servers) leaves HEAD on a
+    branch that never gets created. Cloning such a repo then checks nothing
+    out and leaves the clone on an unborn branch — which silently made this
+    fixture test nothing.
+    """
+    subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "symbolic-ref", "HEAD",
+                    "refs/heads/main"], check=True)
+
+
+def init_work(path):
+    """A working repo on main with a deterministic identity."""
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-q")
+    git(path, "checkout", "-q", "-B", "main")
+    git(path, "config", "user.name", "t")
+    git(path, "config", "user.email", "t@t")
+    git(path, "config", "commit.gpgsign", "false")
+
+
 def _fixture(with_vault=True):
     """A WM_ROOT git repo with a bare remote, plus an optional vault clone."""
     td = pathlib.Path(tempfile.mkdtemp(prefix="wm-backup-test-"))
@@ -41,33 +65,25 @@ def _fixture(with_vault=True):
     (root / "meta").mkdir(parents=True)
     (root / "raw").mkdir()
     (root / "raw" / "2026-08.md").write_text("## 2026-08-01T00:00:00+05:30\n")
-    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-    git(root, "init", "-q")
-    git(root, "config", "user.name", "t")
-    git(root, "config", "user.email", "t@t")
-    git(root, "config", "commit.gpgsign", "false")
+    init_bare(remote)
+    init_work(root)
     (root / ".gitignore").write_text("records.db\nrecords.db-*\nmeta/*.lock\n*.tmp\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "branch", "-M", "main")
     git(root, "remote", "add", "origin", str(remote))
-    git(root, "push", "-q", "-u", "origin", "main")
+    r = git(root, "push", "-q", "-u", "origin", "main")
+    assert r.returncode == 0, f"fixture push failed: {r.stderr}"
 
     vault = td / "wiki"
     if with_vault:
-        vremote = td / "wiki.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(vremote)], check=True)
-        vault.mkdir()
-        git(vault, "init", "-q")
-        git(vault, "config", "user.name", "t")
-        git(vault, "config", "user.email", "t@t")
-        git(vault, "config", "commit.gpgsign", "false")
+        init_bare(td / "wiki.git")
+        init_work(vault)
         (vault / "index.md").write_text("# vault\n")
         git(vault, "add", "-A")
         git(vault, "commit", "-q", "-m", "init")
-        git(vault, "branch", "-M", "main")
-        git(vault, "remote", "add", "origin", str(vremote))
-        git(vault, "push", "-q", "-u", "origin", "main")
+        git(vault, "remote", "add", "origin", str(td / "wiki.git"))
+        r = git(vault, "push", "-q", "-u", "origin", "main")
+        assert r.returncode == 0, f"fixture vault push failed: {r.stderr}"
 
     hermes = td / "hermes"
     hermes.mkdir()
@@ -185,14 +201,24 @@ def test_vault_pull_when_behind():
     """Devices push to the vault legitimately; being behind is not an alert."""
     td, root, vault, hermes = _fixture()
     other = td / "other"
-    subprocess.run(["git", "clone", "-q", str(td / "wiki.git"), str(other)], check=True)
+    # -b main explicitly: never rely on the remote's HEAD or on this host's
+    # init.defaultBranch.
+    subprocess.run(["git", "clone", "-q", "-b", "main", str(td / "wiki.git"),
+                    str(other)], check=True)
     git(other, "config", "user.name", "t")
     git(other, "config", "user.email", "t@t")
     git(other, "config", "commit.gpgsign", "false")
     (other / "from-phone.md").write_text("captured elsewhere")
     git(other, "add", "-A")
     git(other, "commit", "-q", "-m", "from another device")
-    git(other, "push", "-q")
+    r = git(other, "push", "-q")
+    check(r.returncode == 0, f"the other device pushed ({r.stderr})")
+    # Guard the premise: if the vault is not actually behind, the assertion
+    # below would pass for the wrong reason.
+    counts = git(vault, "rev-list", "--left-right", "--count", "HEAD...@{u}")
+    git(vault, "fetch", "origin")
+    behind = git(vault, "rev-list", "--count", "HEAD..@{u}").stdout.strip()
+    check(behind == "1", f"vault is genuinely 1 behind before the run (got {behind!r})")
 
     r = _run_backup(hermes)
     check(r.stdout.strip() == "", f"being behind is silent (got {r.stdout.strip()!r})")

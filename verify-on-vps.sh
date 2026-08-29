@@ -41,7 +41,17 @@ fi
 printf '  WM_ROOT (env) : %s\n' "$(grep -E '^WM_ROOT=' "$HERMES_HOME/working-memory.env" 2>/dev/null || echo '(not set in working-memory.env)')"
 
 sec "1. Full test suite (temporary roots — your data is not touched)"
-"$PY" "$PKG_DIR/tests/run_all.py"
+# Prefer the Hermes venv: it is the only interpreter that can import the real
+# gateway package, so the capture-gate suites run against the real
+# MessageEvent/SessionSource rather than the stubs.
+if [ -x "$VENV_PY" ]; then
+  SUITE_PY="$VENV_PY"
+  printf '  using the Hermes venv python (real gateway classes)\n'
+else
+  SUITE_PY="$PY"
+  printf '  using system python (gateway stubs)\n'
+fi
+"$SUITE_PY" "$PKG_DIR/tests/run_all.py"
 if [ $? -eq 0 ]; then ok "all offline suites"; else bad "offline suites — see output above"; fi
 
 sec "2. Patch install against the REAL gateway classes"

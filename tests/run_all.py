@@ -34,10 +34,28 @@ SUITES = [
 ]
 
 
-def _gateway_available() -> bool:
+def _hermes_repo() -> pathlib.Path:
+    return pathlib.Path(
+        os.environ.get("HERMES_HOME") or (pathlib.Path.home() / ".hermes")
+    ) / "hermes-agent"
+
+
+def _gateway_available(env) -> bool:
+    """Can the REAL gateway package be imported by this interpreter?
+
+    The package lives in $HERMES_HOME/hermes-agent, so it must be on the
+    path before the probe means anything — the probe used to run with a bare
+    sys.path and therefore always said no, silently downgrading to stubs even
+    on the VPS. It also needs this interpreter to have the gateway's
+    dependencies, which the system python usually does not: run this script
+    with $HERMES_HOME/hermes-agent/venv/bin/python for full fidelity.
+    """
     probe = subprocess.run(
         [sys.executable, "-c", "import gateway.platforms.base"],
-        capture_output=True)
+        capture_output=True, env=env, text=True)
+    if probe.returncode != 0:
+        reason = (probe.stderr.strip().splitlines() or ["unknown"])[-1]
+        _gateway_available.reason = reason
     return probe.returncode == 0
 
 
@@ -49,11 +67,24 @@ def main() -> int:
     env.pop("WM_VAULT_PATH", None)
     env.pop("WM_TZ", None)
 
-    real = _gateway_available()
+    # Put the Hermes repo on the path FIRST, so the probe can find the real
+    # package when it exists rather than defaulting to the stub.
+    repo = _hermes_repo()
+    if repo.is_dir():
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(repo), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+
+    real = _gateway_available(env)
     if real:
-        print("gateway: using the real Hermes package")
+        print(f"gateway: using the REAL Hermes package ({repo})")
     else:
-        print("gateway: not importable — using tests/stubs")
+        why = getattr(_gateway_available, "reason", "not found")
+        print(f"gateway: real package not importable — using tests/stubs\n"
+              f"         ({why})")
+        if repo.is_dir():
+            print(f"         hint: {repo} exists; re-run with "
+                  f"{repo / 'venv' / 'bin' / 'python'} to test against the "
+                  f"real classes")
         env["PYTHONPATH"] = os.pathsep.join(
             [str(TESTS / "stubs"), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
 
