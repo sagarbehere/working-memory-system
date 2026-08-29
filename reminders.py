@@ -52,7 +52,15 @@ DEFAULT_RECONCILE_EVERY_MINUTES = 30
 
 
 def state_path(root):
-    """Small cache: Todoist project id + last reconcile time. Disposable."""
+    """Small cache: Todoist project id + last reconcile time.
+
+    Fully disposable — the project id costs one API call to re-resolve and a
+    missing reconcile stamp just means one extra sync. Gitignored on purpose:
+    last_reconcile_at changes every reconcile window, so tracking it would
+    give the nightly backup a diff to commit every single night even when
+    nothing real happened, which is exactly the noise the watchdog design
+    tries to avoid.
+    """
     return pathlib.Path(root) / "meta" / "todoist-state.json"
 
 

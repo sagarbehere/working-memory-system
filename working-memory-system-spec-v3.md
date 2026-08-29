@@ -87,6 +87,8 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
     pending-buffer.json      # unflushed per-chat message buffer (Section 11)
     lanes.json               # reserved chats (Section 2)
     reminders.lock           # flock serialising the agent and the cron tick (§9)
+    rawlog.lock              # flock serialising concurrent raw-log appends (§5)
+    todoist-state.json       # disposable cache: project id + last reconcile (gitignored)
     refinement-log.md        # curated patterns worth reviewing (Section 17)
 ```
 

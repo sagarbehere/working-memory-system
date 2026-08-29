@@ -38,6 +38,7 @@ python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
 WM_IGNORES='meta/pending-buffer.json
 meta/*.lock
 meta/tag-index.json
+meta/todoist-state.json
 logs/
 *.tmp
 records.db
