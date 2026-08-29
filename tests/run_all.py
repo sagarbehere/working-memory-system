@@ -31,7 +31,6 @@ SUITES = [
     ("todoist budget   ", "test_todoist_budget.py"),
     ("capture gate     ", "test_gate.py"),
     ("gate cases       ", "test_gate_cases.py"),
-    ("gate health      ", "test_gate_health.py"),
     ("backup push      ", "test_backup.py"),
     ("debounce hook    ", "test_debounce.py"),
     ("no vestigial refs", "test_no_vestigial_refs.py"),

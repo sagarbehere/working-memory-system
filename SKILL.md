@@ -133,18 +133,20 @@ Then classify the item and route it:
   is NOT edited; say so plainly rather than implying the words are gone.
 - Ambiguous target → ask, never guess.
 
-## Consolidation (v3, nightly job + size triggers)
+## Upkeep
 
-- Reference-flavored vault notes: condense like v2 topic files (derived,
-  regenerable).
-- **Series notes are never collapsed** — a measurement history is the point;
-  summarising it destroys what it exists for.
-- Supersession: newer replaces older; `status: superseded` suppresses from
-  defaults.
-- Expiry: resolved reminders / time-bound lines drop from derived notes; raw
-  untouched. Rotate raw >60-90d to `raw/archive/`; delete `logs/` >30d.
-- The nightly gate (`wm-consolidation-gate.py`) prints a digest only when
-  there's work; a silent night is normal.
+There is **no scheduled agent job** (2026-08-29 cut). Nothing wakes you on a
+timer, so upkeep happens when it comes up in conversation:
+
+- Series notes stay itemised — never collapse a measurement history.
+- Supersession: a newer fact replaces an older one; mark the old
+  `status: superseded` rather than deleting it.
+- Condense a reference note when it has visibly sprawled and the user asks,
+  or when you are already editing it. Do not go looking for work.
+- The transcript is never edited, rotated, or pruned by you.
+
+The nightly backup watchdog reports anything that failed quietly and prunes
+old logs. It is not an agent job and costs no tokens.
 
 ## Reminders (Todoist only)
 
@@ -169,12 +171,12 @@ recurring `unfiled` fallbacks, missed retrievals, or rules that don't fit.
 Entries carry `STATUS: PENDING APPROVAL` or `STATUS: INFO`. Categories include
 `POLICY` (classification/routing/tag rules) and **`CODE IMPROVEMENT`**
 (proposals for the deterministic layer, with before/after + why).
-- **Role (2026-08-29):** the log is a *decision record + async mailbox*,
-  not the decision channel — rulings happen in conversation (agent presents
-  a before/after and WAITs), the log records outcomes; `PENDING APPROVAL`
-  entries are the mailbox the nightly gate surfaces for decisions not
-  settled in chat. File-change history lives in git; the log carries the
-  decisions git can't.
+- **Role:** the log is a *decision record*, not the decision channel —
+  rulings happen in conversation (present a before/after and WAIT), and the
+  log records the outcome. It is no longer a mailbox: with no scheduled agent
+  job, you only ever run while the user is present, so raise a proposal in
+  the conversation rather than filing it for a job that will never read it.
+  File-change history lives in git; the log carries the decisions git can't.
 Approval boundary:
 - **Auto-tune:** numeric thresholds already flagged tunable — apply, log why.
 - **Sign-off required:** policy changes (classification rules, routing rules,
@@ -192,7 +194,7 @@ Approval boundary:
 - Extraction fails → retry once → single untagged `unfiled` raw entry, never
   drop a capture; log the fallback.
 - A structured-record insert fails → log; keep the raw entry; retry at next
-  consolidation.
+  the conversation you are in.
 - Telegram reply fails → retry once; don't claim success.
 
 ## Escalation

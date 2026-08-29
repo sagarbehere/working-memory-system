@@ -7,12 +7,13 @@ cron job (03:00 daily) so a healthy night is silent and a broken one
 delivers exactly the problem — no tokens, no agent.
 
 Run steps:
-  1. Todoist export (JSONL of open tasks) -> todoist-export.jsonl, skipped
+  1. Report anything that failed quietly in the last day, and prune old logs.
+  2. Todoist export (JSONL of open tasks) -> todoist-export.jsonl, skipped
      silently when Todoist isn't configured. Since Todoist owns reminders
      outright, this export is their only off-box copy.
-  2. git add -A + commit (only when something changed) in WM_ROOT.
-  3. git push origin <branch> — the private remote (off-box copy <= 24h lag).
-  4. Vault sync: git fetch + pull --ff-only when behind (devices push
+  3. git add -A + commit (only when something changed) in WM_ROOT.
+  4. git push origin <branch> — the private remote (off-box copy <= 24h lag).
+  5. Vault sync: git fetch + pull --ff-only when behind (devices push
      legitimately); alert only on unpushed local commits or a failed pull.
 
 What it backs up is now just the raw transcript, meta/, and the Todoist
@@ -25,16 +26,23 @@ printed instead of propagating, so the scheduler's generic error alert
 never duplicates the payload.
 """
 
+import json
 import os
+import re
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import todoist  # noqa: E402
 import wmlib  # noqa: E402
+import datetime as _dt  # noqa: E402
 
 REMOTE = "origin"
 BRANCH = "main"
+# This job runs nightly, so "recent" is the last day. No state file needed:
+# a window keyed to the schedule cannot drift out of step with it.
+FAILURE_WINDOW_HOURS = 24
+LOG_RETENTION_DAYS = 30
 
 
 def run(cmd):
@@ -43,6 +51,66 @@ def run(cmd):
 
 def _err(r):
     return (r.stderr or r.stdout).strip()
+
+
+def recent_failures(root):
+    """Failure lines logged in the last day, as 'component event: N'.
+
+    Inherited from the consolidation gate when that was removed: the gate's
+    only irreplaceable job was noticing that something had been failing
+    quietly. This is already the watchdog that speaks when things are wrong,
+    so it is the natural home — and it needs no separate script or cron entry.
+    """
+    logs = os.path.join(root, "logs")
+    if not os.path.isdir(logs):
+        return []
+    cutoff = wmlib.now() - _dt.timedelta(hours=FAILURE_WINDOW_HOURS)
+    counts = {}
+    for fn in sorted(os.listdir(logs)):
+        if not re.match(r"\d{4}-\d{2}\.log$", fn):
+            continue
+        try:
+            with open(os.path.join(logs, fn), encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    if obj.get("outcome") not in ("failed", "retry", "unfiled-fallback"):
+                        continue
+                    ts = wmlib.parse_iso(obj.get("ts"))
+                    if ts is None or ts < cutoff:
+                        continue
+                    key = (obj.get("component", "?"), obj.get("event", "?"))
+                    counts[key] = counts.get(key, 0) + 1
+        except OSError:
+            continue
+    return [f"{c} {e}: {n} failure(s) in the last {FAILURE_WINDOW_HOURS}h"
+            for (c, e), n in sorted(counts.items())]
+
+
+def prune_logs(root):
+    """Delete diagnostic logs older than the retention window. Silent."""
+    logs = os.path.join(root, "logs")
+    if not os.path.isdir(logs):
+        return
+    cutoff = (wmlib.now() - _dt.timedelta(days=LOG_RETENTION_DAYS)).date()
+    for fn in sorted(os.listdir(logs)):
+        m = re.match(r"(\d{4})-(\d{2})\.log$", fn)
+        if not m:
+            continue
+        try:
+            month_end = _dt.date(int(m.group(1)), int(m.group(2)), 28)
+        except ValueError:
+            continue
+        if month_end < cutoff:
+            try:
+                os.unlink(os.path.join(logs, fn))
+            except OSError:
+                pass
 
 
 def main():
@@ -56,7 +124,11 @@ def main():
         print(f"WM backup: {root} is not a git repo — nothing to push.")
         return 0
 
-    # 1. Todoist export — silent when Todoist simply isn't configured.
+    # 1. Anything failing quietly? (was the consolidation gate's one real job)
+    alerts.extend(recent_failures(root))
+    prune_logs(root)
+
+    # 2. Todoist export — silent when Todoist simply isn't configured.
     #    (This used to alert on every healthy night for anyone not using it,
     #    which trains you to ignore the watchdog.)
     if todoist.enabled():
@@ -68,7 +140,7 @@ def main():
         else:
             alerts.append(f"WM backup: Todoist export failed (continuing): {_err(r)}")
 
-    # 2. Commit any changes
+    # 3. Commit any changes
     r = run(["git", "-C", root, "add", "-A"])
     if r.returncode != 0:
         alerts.append(f"WM backup: git add failed: {_err(r)}")
@@ -78,7 +150,7 @@ def main():
         if r.returncode != 0:
             alerts.append(f"WM backup: git commit failed: {_err(r)}")
 
-    # 3. Push to the private remote
+    # 4. Push to the private remote
     r = run(["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"])
     branch = r.stdout.strip() or BRANCH
     if run(["git", "-C", root, "remote", "get-url", REMOTE]).returncode != 0:
@@ -92,7 +164,7 @@ def main():
                 "WM backup: git push failed — check the private remote exists "
                 f"and the PAT covers it: {_err(r)}")
 
-    # 4. Vault sync: devices push legitimately, so pull --ff-only when behind
+    # 5. Vault sync: devices push legitimately, so pull --ff-only when behind
     #    (silent); alert only on unpushed local commits or a failed pull.
     if os.path.isdir(os.path.join(vault, ".git")):
         r = run(["git", "-C", str(vault), "fetch", REMOTE])

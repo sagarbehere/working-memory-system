@@ -2,14 +2,12 @@
 """Tests for the raw capture transcript (rawlog.py).
 
 The transcript is deliberately tiny — a timestamp and verbatim text — so the
-surface worth testing is narrow: the consolidation gate must be able to count
-every entry, captured text must survive verbatim whatever it contains, and
-entries written by earlier versions (which carried ids and typed fields) must
-still read back.
+surface worth testing is narrow: every entry must read back, captured text
+must survive verbatim whatever it contains, and entries written by earlier
+versions (which carried ids and typed fields) must still parse.
 
 Run: python3 tests/test_rawlog.py   (from the package dir)
 """
-import importlib.util
 import json
 import os
 import pathlib
@@ -21,10 +19,6 @@ PKG = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PKG))
 import rawlog  # noqa: E402
 import wmlib  # noqa: E402
-
-_spec = importlib.util.spec_from_file_location("wm_gate", PKG / "wm-consolidation-gate.py")
-gate = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(gate)
 
 checks = 0
 
@@ -54,15 +48,16 @@ def test_format():
           "no classification and no id — the destination note carries those")
 
 
-def test_gate_counts_every_entry():
-    """A header the gate cannot read means an entry never gets consolidated."""
+def test_every_entry_is_readable():
+    """An entry that does not parse back is lost, silently."""
     root = _root()
     for i in range(5):
         rawlog.add(root, f"entry {i}", force=True)
     rawlog.add(root, "unicode ✅ and : colons: everywhere", force=True)
-    count, newest = gate.raw_entries_since(str(root), None)
-    check(count == 6, f"gate counts every entry (got {count}/6)")
-    check(newest is not None and newest.tzinfo is not None, "aware timestamp read")
+    entries = rawlog.read_entries(root)
+    check(len(entries) == 6, f"every written entry reads back (got {len(entries)}/6)")
+    check(all(wmlib.parse_iso(e["ts"]) is not None for e in entries),
+          "every header carries a parseable, aware timestamp")
 
 
 def test_text_survives_verbatim():
@@ -169,13 +164,11 @@ def test_concurrent_appends():
         p.communicate(timeout=60)
     check(len(rawlog.read_entries(root)) == 8,
           f"8 concurrent writers -> 8 entries (got {len(rawlog.read_entries(root))})")
-    count, _ = gate.raw_entries_since(str(root), None)
-    check(count == 8, "all 8 parseable by the gate")
 
 
 def main():
     test_format()
-    test_gate_counts_every_entry()
+    test_every_entry_is_readable()
     test_text_survives_verbatim()
     test_dedup()
     test_search()

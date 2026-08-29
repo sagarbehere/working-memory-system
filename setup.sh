@@ -100,16 +100,15 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #     take effect immediately — no refresh step; re-run setup.sh only if
 #     the package moves or a new helper script is added. The package path
 #     is baked in at generation time (2026-08-29 wrapper model):
-#       - wm-consolidation-gate.py  -> nightly consolidation gate (context
-#         script: empty output = no work = scheduler skips the AI call)
-#       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
 #       - wm-backup-push.py         -> nightly backup push to the private
-#         remote (watchdog: silent when healthy, alerts on failure)
+#         remote (watchdog: silent when healthy, alerts on failure; also
+#         reports anything that failed quietly and prunes old logs)
+#       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
 #       - rawlog.py                 -> raw capture log CLI (owns the entry format)
 #       - todoist.py                -> Todoist client (the reminder layer)
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py rawlog.py todoist.py"
+WRAPPED_SCRIPTS="cron-session-prune.py wm-backup-push.py rawlog.py todoist.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then
@@ -136,7 +135,7 @@ echo "Wrapper scripts installed (exec package copies): $WRAPPED_SCRIPTS"
 #     resolves scripts from this directory — that is how a superseded script
 #     once stayed in the scheduler's path. Named explicitly, never a directory
 #     sweep: other projects keep their own scripts here.
-RETIRED_SCRIPTS="reminders.py records.py reminder-check.py"
+RETIRED_SCRIPTS="reminders.py records.py reminder-check.py wm-consolidation-gate.py"
 for s in $RETIRED_SCRIPTS; do
   target="$HERMES_HOME/scripts/$s"
   if [ -f "$target" ]; then

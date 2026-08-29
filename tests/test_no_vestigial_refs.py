@@ -37,6 +37,8 @@ REMOVED = {
     "TODOIST_RECONCILE_MINUTES": "there is no reconcile loop any more",
     "reminder-check.lock": "the tick lock; there is no tick",
     "reminders.lock": "the reminder store lock; there is no store",
+    "wm-consolidation-gate.py": "the nightly gate; nothing schedules the agent",
+    "WM_RAW_RETENTION_DAYS": "raw rotation; search reads the archive anyway",
 }
 
 # Exemptions. Map file -> "*" (whole file) or a set of specific tokens, so
@@ -55,9 +57,10 @@ ALLOWED = {
     # to tell the user to clean them up.
     "verify-on-vps.sh": {"reminders.py", "records.py", "reminder-check.py",
                          "records.db", "reminders.json", "records-snapshot.db",
-                         "tag-index.json"},
+                         "tag-index.json", "wm-consolidation-gate.py"},
     "setup.sh": {"records.db", "reminders.json", "records-snapshot.db",
-                 "reminder-check.py", "reminders.py", "records.py"},
+                 "reminder-check.py", "reminders.py", "records.py",
+                 "wm-consolidation-gate.py"},
     "crontab.example": {"reminder-check.py"},
     # Strips field lines from entries written before the cut; must name them.
     "rawlog.py": {"record_kind"},

@@ -9,6 +9,7 @@ nothing, or the watchdog trains you to ignore it.
 
 Run: python3 tests/test_backup.py   (from the package dir)
 """
+import json
 import os
 import pathlib
 import subprocess
@@ -119,6 +120,56 @@ def test_silent_when_healthy():
           f"no vault configured -> still silent (got {r.stdout.strip()!r})")
 
 
+def test_reports_quiet_failures():
+    """The one job the consolidation gate did that nothing else did.
+
+    Failures are logged by the capture path but nobody reads logs/. The
+    watchdog surfaces recent ones so a persistent problem cannot stay silent.
+    """
+    td, root, _vault, hermes = _fixture()
+    logs = root / "logs"
+    logs.mkdir(exist_ok=True)
+    import datetime as dt
+    now = dt.datetime.now().astimezone()
+    old = now - dt.timedelta(days=3)
+    with (logs / f"{now:%Y-%m}.log").open("w") as f:
+        for ts, outcome in ((now, "failed"), (now, "failed"), (now, "ok"), (old, "failed")):
+            f.write(json.dumps({"ts": ts.isoformat(timespec="seconds"),
+                                "component": "todoist", "event": "create",
+                                "outcome": outcome}) + "\n")
+        f.write("not json at all\n")
+
+    r = _run_backup(hermes)
+    check("todoist create: 2 failure(s)" in r.stdout,
+          f"recent failures reported, older ones not (got {r.stdout!r})")
+    check("ok" not in r.stdout.split("failure(s)")[0].split("todoist")[0],
+          "successes are not reported")
+
+    # And a healthy log stays silent.
+    td2, root2, _v2, hermes2 = _fixture()
+    (root2 / "logs").mkdir(exist_ok=True)
+    (root2 / "logs" / f"{now:%Y-%m}.log").write_text(
+        json.dumps({"ts": now.isoformat(timespec="seconds"), "component": "rawlog",
+                    "event": "add", "outcome": "ok"}) + "\n")
+    r = _run_backup(hermes2)
+    check(r.stdout.strip() == "", f"no failures -> still silent (got {r.stdout!r})")
+
+
+def test_prunes_old_logs():
+    td, root, _vault, hermes = _fixture()
+    logs = root / "logs"
+    logs.mkdir(exist_ok=True)
+    import datetime as dt
+    now = dt.datetime.now().astimezone()
+    keep = logs / f"{now:%Y-%m}.log"
+    drop = logs / f"{(now - dt.timedelta(days=200)):%Y-%m}.log"
+    keep.write_text("")
+    drop.write_text("")
+    _run_backup(hermes)
+    check(keep.exists(), "the current log is kept")
+    check(not drop.exists(), "a log older than the retention window is pruned")
+
+
 def test_alerts_on_real_problems():
     """The watchdog must still speak up when something is genuinely wrong."""
     td, root, vault, hermes = _fixture()
@@ -177,6 +228,8 @@ def test_pushes_to_remote():
 
 def main():
     test_silent_when_healthy()
+    test_reports_quiet_failures()
+    test_prunes_old_logs()
     test_alerts_on_real_problems()
     test_vault_pull_when_behind()
     test_pushes_to_remote()

@@ -73,7 +73,6 @@ better, because it makes the mistake impossible), or a wrong expectation
 
 | Check | Expect |
 |---|---|
-| `python3 ~/.hermes/scripts/wm-consolidation-gate.py` | Silence on a quiet day. Output only when there is real work. |
-| Wait for the nightly backup | Silence. Any output is a real problem. |
+| Wait for the nightly backup | Silence. Any output is a real problem — it now also reports anything that failed quietly in the last day. |
 | `cd ~/working-memory && git log --oneline -3` | Recent commits; nothing uncommitted for long. |
 | `cd <vault> && git status` | Clean and pushed — a local-only commit is not backed up. |

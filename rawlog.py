@@ -39,7 +39,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wmlib  # noqa: E402
 
-# Matched by the consolidation gate too, which counts new entries this way.
 # The trailing `[id: …]` is not written any more, but entries captured before
 # the 2026-08-29 cut carry one and MUST still parse — the transcript is
 # append-only, so old and new formats coexist in the same file forever.

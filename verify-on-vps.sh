@@ -65,8 +65,7 @@ else
 fi
 
 sec "3. Every script still imports and runs --help"
-for s in wmlib.py rawlog.py todoist.py \
-         wm-consolidation-gate.py wm-backup-push.py cron-session-prune.py; do
+for s in wmlib.py rawlog.py todoist.py wm-backup-push.py cron-session-prune.py; do
   if "$PY" -c "import py_compile,sys; py_compile.compile('$PKG_DIR/$s', doraise=True)" 2>/dev/null; then
     ok "compiles: $s"
   else
@@ -107,12 +106,7 @@ else
   bad "WM_ROOT $WM_ROOT_LIVE does not exist"
 fi
 
-sec "5. Consolidation gate against the live root (read-only)"
-echo "  --- stdout below; EMPTY output is the healthy 'no work' case ---"
-"$PY" "$PKG_DIR/wm-consolidation-gate.py" 2>&1 | sed 's/^/    /'
-printf '  exit=%s\n' "$?"
-
-sec "6. Todoist connectivity (optional)"
+sec "5. Todoist connectivity (optional)"
 if "$PY" -c "import sys; sys.path.insert(0,'$PKG_DIR'); import todoist; sys.exit(0 if todoist.enabled() else 1)" 2>/dev/null; then
   if "$PY" "$PKG_DIR/todoist.py" list >/dev/null 2>&1; then
     ok "Todoist reachable ($("$PY" "$PKG_DIR/todoist.py" list 2>/dev/null | wc -l) open tasks)"
@@ -124,27 +118,29 @@ else
   skip "Todoist not enabled (TODOIST_MIRROR_ENABLED / TODOIST_API_TOKEN)"
 fi
 
-sec "7. Installed wiring (symlinks, wrappers, cron)"
+sec "6. Installed wiring (symlinks, wrappers, cron)"
 for p in "$HERMES_HOME/hooks/working-memory-debounce" \
          "$HERMES_HOME/skills/note-taking/working-memory/SKILL.md"; do
   if [ -e "$p" ]; then ok "present: $p -> $(readlink -f "$p" 2>/dev/null || echo "$p")"; else bad "missing: $p"; fi
 done
 echo "  wrapper scripts in $HERMES_HOME/scripts:"
 ls -1 "$HERMES_HOME/scripts" 2>/dev/null | sed 's/^/    /' || echo "    (none)"
-for w in rawlog.py todoist.py wm-consolidation-gate.py; do
+for w in rawlog.py todoist.py wm-backup-push.py; do
   if [ -f "$HERMES_HOME/scripts/$w" ] && grep -q "Wrapper" "$HERMES_HOME/scripts/$w" 2>/dev/null; then
     ok "wrapper installed: $w"
   else
     bad "$w is missing or is a stale COPY, not a wrapper — re-run setup.sh"
   fi
 done
-for gone in reminders.py records.py reminder-check.py; do
+for gone in reminders.py records.py reminder-check.py wm-consolidation-gate.py; do
   if [ -e "$HERMES_HOME/scripts/$gone" ]; then
     bad "$gone still present in ~/.hermes/scripts — DELETE it; it is a stale copy of removed code"
   else
     ok "removed script absent: $gone"
   fi
 done
+echo "  Hermes cron jobs (there must be NO job invoking the agent):"
+hermes cron list 2>/dev/null | sed 's/^/    /' || echo "    (could not list — check manually)"
 echo "  crontab lines mentioning the removed tick (should be EMPTY):"
 crontab -l 2>/dev/null | grep -i 'reminder-check' | sed 's/^/    /' && bad "remove that crontab line — the script no longer exists" || ok "no stale crontab entry"
 echo "  crontab lines mentioning working-memory:"

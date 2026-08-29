@@ -4,7 +4,7 @@
 #
 # Includes:
 #   - the package (working-memory-system/): source, SKILL.md, hook, scripts
-#     (rawlog.py, todoist.py, wm-consolidation-gate.py, cron-session-prune.py,
+#     (rawlog.py, todoist.py, wm-backup-push.py, cron-session-prune.py,
 #     setup.sh, export.sh), spec, tests, backups/, and its .git history
 #   - the data (working-memory/): the raw transcript, meta/,
 #     refinement log, and its .git history (point-in-time recovery)
@@ -93,25 +93,20 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "                     thread_id: <thread_id>"
     echo "                       skill: working-memory"
     echo "  5) No OS crontab entry is needed (see crontab.example)."
-    echo "  6) Re-create the Hermes cron jobs — they live in Hermes's cron"
-    echo "     store, not in this archive. Ask your agent:"
-    echo "     a) \"recreate the working-memory consolidation cron job\""
-    echo "        (schedule 30 2 * * * local, skills=[working-memory],"
-    echo "        script=wm-consolidation-gate.py, deliver to the WM chat,"
-    echo "        toolsets file+terminal). The gate script is included in"
-    echo "        this package and copied to ~/.hermes/scripts/ by"
-    echo "        setup.sh — DO NOT recreate the job without attaching it,"
-    echo "        or it will mint a session every night even when idle."
+    echo "  6) Re-create the Hermes cron jobs — they live in Hermes\'s cron"
+    echo "     store, not in this archive. Both are no_agent watchdogs; there"
+    echo "     is deliberately NO job that invokes the agent. Ask your agent:"
+    echo "     a) \"recreate the nightly working-memory backup push job\""
+    echo "        (no_agent, 03:00 daily, script=wm-backup-push.py)."
     echo "     b) \"recreate the monthly cron-session prune job\""
-    echo "        (no_agent script cron-session-prune.py, monthly, silent"
-    echo "        unless it pruned something)."
+    echo "        (no_agent, monthly, silent unless it pruned something)."
     echo "  7) Restart the gateway (from SSH):  hermes gateway restart"
     echo "  8) /reload-skills in Telegram so sessions pick up the skill."
     echo
     echo "Reminders fire into WM_TELEGRAM_CHAT_ID(+THREAD_ID) via the existing bot."
     echo "No bot token is included in this archive (it lives in ~/.hermes/.env)."
-    echo "The nightly consolidation policy ships in SKILL.md (in the package);"
-    echo "only its scheduled registration is per-install and re-created in step 6."
+    echo "Capture policy ships in SKILL.md (in the package); only the cron"
+    echo "registrations are per-install and re-created in step 6."
 } > "$NOTES"
 
 # 4. Bundle

@@ -34,15 +34,14 @@ private remote. Never commit data into this repo.
 wmlib.py                  env parsing, timezone, logging, atomic writes, locking
 rawlog.py                 the raw capture log (CLI) — owns the on-disk entry format
 todoist.py                Todoist client + CLI — the reminder layer
-wm-consolidation-gate.py  cron: nightly; prints work or stays SILENT
-wm-backup-push.py         cron: nightly backup push (watchdog)
+wm-backup-push.py         cron: nightly backup + health watchdog (silent when well)
 cron-session-prune.py     cron: monthly session cleanup
 hooks/working-memory-debounce/handler.py
                           the capture gate — monkey-patches Hermes' inbound seam
 SKILL.md                  the agent's policy (installed as a Hermes skill)
 setup.sh / export.sh      installer / machine-to-machine migration
 verify-on-vps.sh          full verification against the live install
-tests/                    9 suites; tests/run_all.py runs them all
+tests/                    8 suites; tests/run_all.py runs them all
 ```
 
 Design docs, in the order worth reading:
@@ -62,7 +61,6 @@ Design docs, in the order worth reading:
 | change how a capture is classified or routed | `SKILL.md`, `second-brain-schema.md` |
 | touch reminders | `todoist.py` — there is no local reminder store |
 | change the transcript format or dedup | `rawlog.py` — and the spec §5 contract |
-| change what triggers the nightly agent run | `wm-consolidation-gate.py` |
 | change capture/buffering/lanes | `hooks/working-memory-debounce/handler.py` |
 | add or change a Todoist call | `todoist.py`, then check the call budget (below) |
 | change timezone or env handling | `wmlib.py` — do not reimplement it locally |
@@ -73,7 +71,7 @@ Design docs, in the order worth reading:
 These exist because breaking them caused real bugs. Each is enforced by a test.
 
 1. **Never hand-write `raw/`.** Use `rawlog.py`. A malformed header makes an
-   entry invisible to the consolidation gate forever, and nothing reports it.
+   entry unreadable, and nothing reports it.
    The transcript is append-only: never edit or delete an entry, including for
    "forget X" — say plainly that the words remain.
 2. **The transcript is the only thing upstream of the agent's judgment.** The
@@ -84,16 +82,22 @@ These exist because breaking them caused real bugs. Each is enforced by a test.
 3. **Timestamps: store aware, display local.** Everything shown to a user goes
    through `wmlib.local_iso()`. Never hardcode an offset or a zone;
    `wmlib.tz()` resolves `WM_TZ` or the system zone.
-4. **Watchdogs are silent when healthy.** `wm-consolidation-gate.py` printing
-   nothing is how the scheduler knows to skip the AI call entirely — that is
-   the whole point of the gate. `wm-backup-push.py` prints only problems. An
-   alert that fires on a healthy night trains the user to ignore it, so gate
-   every alert on the relevant feature actually being configured.
-5. **No hardcoded paths.** `WM_ROOT`, `WM_VAULT_PATH`, `WM_TZ` are config.
+4. **Watchdogs are silent when healthy.** `wm-backup-push.py` prints only
+   problems; the no_agent scheduler delivers its stdout verbatim, so anything
+   it prints reaches the user. An alert that fires on a healthy night trains
+   the user to ignore it, so gate every alert on the relevant feature actually
+   being configured.
+5. **Nothing runs the agent on a schedule.** Since the 2026-08-29 cut the only
+   cron jobs are `no_agent` watchdogs. The agent is alive only while the user
+   is talking to it — which is why the refinement log is a decision record and
+   not a mailbox. **Do not add a scheduled agent job** without a concrete
+   reason; the last one cost tokens nightly to report work that had already
+   been done at capture time.
+6. **No hardcoded paths.** `WM_ROOT`, `WM_VAULT_PATH`, `WM_TZ` are config.
    Resolve them with `wmlib`, which honours both the process env and
    `~/.hermes/working-memory.env`.
-6. **The Todoist call budget is deliberate.** See below.
-7. **The raw log is append-only and is the audit trail.** Everything else is
+7. **The Todoist call budget is deliberate.** See below.
+8. **The raw log is append-only and is the audit trail.** Everything else is
    derived and regenerable. Never rewrite `raw/`.
 
 ## The Todoist call budget
@@ -126,9 +130,9 @@ effect immediately — no refresh step.
 stale copy waiting to happen — that exact situation once put a superseded
 script in the scheduler's path.
 
-Current scheduled work — all inside Hermes, **no OS crontab entry**:
-`wm-consolidation-gate.py` (nightly), `wm-backup-push.py` (nightly no_agent),
-`cron-session-prune.py` (monthly).
+Current scheduled work — all inside Hermes, **no OS crontab entry, and no job
+that invokes the agent**: `wm-backup-push.py` (nightly no_agent) and
+`cron-session-prune.py` (monthly no_agent).
 
 ## Testing
 
