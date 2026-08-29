@@ -62,7 +62,7 @@ cd working-memory-system
 
 1. Creates the data skeleton at `~/working-memory` (`WM_ROOT`) and initializes its backup git repo.
 2. Symlinks `SKILL.md` into Hermes' skills directory and the hook into `~/.hermes/hooks/`.
-3. Copies the two cron helper scripts into `~/.hermes/scripts/` (copies, not symlinks — Hermes' cron scheduler refuses scripts outside `~/.hermes/`).
+3. Installs the cron/helper scripts as wrappers in `~/.hermes/scripts/` — real files that exec the package copies (the package is the single source of truth; edits apply immediately, no refresh step).
 4. Writes `~/.hermes/working-memory.env` from `.env.example` — **never overwrites** an existing file.
 
 Then:
@@ -189,7 +189,7 @@ Everything durable lives under `WM_ROOT`; a full backup is archiving that one fo
   - *stdout mode* (no Telegram configured): the script prints each due reminder to stdout and marks it fired — wire it as a Hermes no_agent cron job (every 5 minutes, `script=reminder-check.py`, deliver to your home channel) and the scheduler delivers the lines verbatim. Diagnostics go to stderr; stdout carries only reminder lines.
 - **Nightly consolidation** — a *Hermes* cron job (separate from the OS crontab), schedule `30 2 * * *`, with `wm-consolidation-gate.py` as its context script: the gate emits a work-digest only when there IS work, so quiet nights are normal (no tokens, no delivery). Register it on a new machine by asking your agent: *"recreate the working-memory consolidation cron job"* — the policy ships in SKILL.md, only the registration is per-install.
 - **Monthly session prune** — optional watchdog: `cron-session-prune.py` (no-agent cron job, silent unless it pruned something).
-- **After a Hermes update** — re-run `./setup.sh` to refresh the copied cron scripts (the skill/hook symlinks survive on their own).
+- **After a Hermes update** — normally nothing to do: the wrapper scripts exec the package copies, so edits apply immediately; re-run `./setup.sh` only if the package moved or a new helper script was added (the skill/hook symlinks survive on their own).
 - **Refinement loop (spec §17)** — the agent logs recurring frictions; numeric threshold tweaks are auto-applied (logged), policy changes to SKILL.md are proposed for your sign-off, and the deterministic code is never self-edited.
 
 ## Troubleshooting
