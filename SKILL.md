@@ -85,7 +85,7 @@ and commit `~/working-memory` after the batch):
 
 | `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | local `reminders.json` (+ Todoist mirror) | v2 format: `{id, due_at, message, raw_entry_id, status, origin}`; set `mirrored: true` when the Todoist mirror succeeds |
+| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | write the local entry first — `{id, due_at, message, raw_entry_id, status, origin, mirrored, todoist_id}` — then, in the same operation, call `python3 ~/.hermes/scripts/todoist.py create --content <message> --due <due_at>`; on success set `mirrored: true` and `todoist_id: <id>` in that same write. On failure/timeout, leave `mirrored: false` — `reminder-check.py`'s cron tick mirrors it on a later run as a durable catch-up, not the primary path. |
 | `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py --root ~/working-memory add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
 | `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
@@ -159,11 +159,16 @@ and commit `~/working-memory` after the batch):
 
 - **Local `reminders.json` is the firing fallback and durable record** — the
   cron (`reminder-check.py`) fires only entries WITHOUT a successful mirror.
-- **Todoist (stage 3, config-gated):** every new reminder mirrors there
-  (best-effort). `mirrored: true` → **local firing is skipped** — Todoist's
-  notification IS the reminder; local fires only when the mirror is absent or
-  failed (Todoist down, token missing, degraded). One notification, from the
-  healthy layer.
+- **Todoist (stage 3, config-gated):** mirrored **synchronously at capture
+  time** — right after writing the local entry, the agent calls
+  `todoist.py create` in the same operation and records `todoist_id` /
+  `mirrored: true` on success. If that call fails or is skipped, the
+  `reminder-check.py` cron tick mirrors any pending reminder still missing
+  `todoist_id` on its next run — a durable catch-up, not the primary path.
+  `mirrored: true` → **local firing is skipped** — Todoist's notification IS
+  the reminder; local fires only when the mirror is absent or failed
+  (Todoist down, token missing, degraded, or the synchronous call never
+  happened). One notification, from the healthy layer.
 - Completion: user checks off in Todoist → reconciliation marks the matching
   local entry `done` (runs in the reminder-check pass, not the digest — digest
   is out of scope).
