@@ -26,21 +26,25 @@ fi
 # 1b. v3: structured-records store (schema §9) — creates records.db (safe to re-run)
 python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
 
-# 2. Backup git repo (spec Section 3) — repo-local identity, no global config
+# 2. Backup git repo (spec Section 3) — repo-local identity, no global config.
+#    FRESH install: init + initial commit so the audit trail starts.
+#    ESTABLISHED repo: identity config only, NEVER commit — pending changes
+#    belong to whoever made them (capture pipeline, agent edits); a catch-all
+#    commit here raced an in-flight edit and mislabeled it "init:" (2026-08-29).
 if [ ! -d "$WM_ROOT/.git" ]; then
   git -C "$WM_ROOT" init -q
-fi
-git -C "$WM_ROOT" config user.name "Hermes Working Memory"
-git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
-if [ ! -f "$WM_ROOT/.gitignore" ]; then
-  printf 'meta/pending-buffer.json\nmeta/reminder-check.lock\nlogs/\n*.tmp\n' > "$WM_ROOT/.gitignore"
-fi
-git -C "$WM_ROOT" add -A
-if ! git -C "$WM_ROOT" diff --cached --quiet; then
-  git -C "$WM_ROOT" commit -q -m "init: working memory skeleton"
+  git -C "$WM_ROOT" config user.name "Hermes Working Memory"
+  git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
+  if [ ! -f "$WM_ROOT/.gitignore" ]; then
+    printf 'meta/pending-buffer.json\nmeta/reminder-check.lock\nlogs/\n*.tmp\n' > "$WM_ROOT/.gitignore"
+  fi
+  git -C "$WM_ROOT" add -A
+  git -C "$WM_ROOT" commit -q -m "init: working memory skeleton" || true
   echo "Git repo initialized with initial commit."
 else
-  echo "Git repo already up to date."
+  git -C "$WM_ROOT" config user.name "Hermes Working Memory"
+  git -C "$WM_ROOT" config user.email "hermes@working-memory.local"
+  echo "Git repo already initialized (working tree left untouched)."
 fi
 
 # 3. Install the skill (SYMLINK, like the hook — the package is the single
