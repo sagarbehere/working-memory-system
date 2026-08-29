@@ -150,6 +150,21 @@ def iso(dt=None, env=None) -> str:
     return (now(env) if dt is None else dt).isoformat(timespec="seconds")
 
 
+def local_iso(value, env=None):
+    """Render a timestamp in the CONFIGURED zone, for display.
+
+    Storage and display are deliberately different jobs: timestamps are
+    stored in UTC so string comparison matches chronological order, but a
+    person should never be shown UTC. Every user-facing timestamp goes
+    through here. Returns the input unchanged if it cannot be parsed, so a
+    display path can never lose data or raise.
+    """
+    dt = parse_iso(value, env)
+    if dt is None:
+        return value
+    return dt.astimezone(tz(env)).isoformat(timespec="seconds")
+
+
 # -------------------------------------------------------------- logging
 
 def log(root, component, event, outcome, **extra) -> None:

@@ -33,8 +33,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wmlib  # noqa: E402
 
 ENV_PATH = str(wmlib.HERMES_HOME / "working-memory.env")
-DEFAULT_ROOT = os.path.expanduser("~/working-memory")
-
 load_env = wmlib.load_env_file
 # Timestamps are parsed in the CONFIGURED zone, not a hardcoded UTC+05:30.
 # The gate used to bake in +05:30 while reminder-check used the system zone,
@@ -233,7 +231,10 @@ def health_issues(root: str, since, entries: list) -> list:
 
 def main() -> int:
     env = load_env(ENV_PATH)
-    root = os.path.expanduser(env.get("WM_ROOT", DEFAULT_ROOT))
+    # wmlib.wm_root honours the WM_ROOT process env var as well as the
+    # config file; resolving it locally here ignored the env var, so the
+    # gate could look at a different directory from everything else.
+    root = str(wmlib.wm_root(env))
     try:
         retention = int(env.get("WM_RAW_RETENTION_DAYS", "90"))
     except ValueError:
@@ -259,7 +260,7 @@ def main() -> int:
             % (
                 new_count,
                 "y" if new_count == 1 else "ies",
-                (" (newest %s)" % newest.isoformat()) if newest else "",
+                (" (newest %s)" % wmlib.local_iso(newest)) if newest else "",
             )
         )
     for fn in rot:

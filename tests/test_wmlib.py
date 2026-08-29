@@ -77,6 +77,24 @@ def test_time():
         os.environ.pop("WM_TZ", None)
 
 
+def test_display_is_never_utc():
+    """Stored timestamps are UTC; displayed ones must be in the configured zone."""
+    os.environ["WM_TZ"] = "Asia/Kolkata"
+    try:
+        check(wmlib.local_iso("2026-08-21T04:00:00+00:00") == "2026-08-21T09:30:00+05:30",
+              "UTC input rendered in the configured zone")
+        check(wmlib.local_iso("2026-08-20T02:00:00-05:00") == "2026-08-20T12:30:00+05:30",
+              "another offset rendered in the configured zone")
+        os.environ["WM_TZ"] = "America/New_York"
+        check(wmlib.local_iso("2026-08-21T04:00:00+00:00").endswith("-04:00"),
+              "follows WM_TZ when it changes")
+        check(wmlib.local_iso("garbage") == "garbage",
+              "unparseable input passes through rather than raising")
+        check(wmlib.local_iso(None) is None, "None passes through")
+    finally:
+        os.environ.pop("WM_TZ", None)
+
+
 def test_atomic_write():
     with tempfile.TemporaryDirectory() as td:
         target = pathlib.Path(td) / "sub" / "x.json"
@@ -116,6 +134,7 @@ def test_lock_excludes():
 def main():
     test_env_quoting()
     test_time()
+    test_display_is_never_utc()
     test_atomic_write()
     test_lock_excludes()
     print(f"ALL WMLIB TESTS PASSED ({checks} checks)")

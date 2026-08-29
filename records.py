@@ -115,16 +115,28 @@ def _load_data(raw):
 
 
 def _row_to_dict(r):
+    """Render a row for display.
+
+    occurred_at is STORED as UTC (so range filters and ORDER BY, which are
+    string comparisons, match chronological order) but is SHOWN in the
+    configured zone — nobody should be reading UTC off their own records.
+    The canonical value stays available as occurred_at_utc, and the offset
+    originally supplied is surfaced only when it differs from both.
+    """
     data = json.loads(r[5]) if r[5] else {}
-    local = data.pop("_occurred_at_local", None)
+    original = data.pop("_occurred_at_local", None)
+    shown = wmlib.local_iso(r[3])
     out = {
-        "id": r[0], "type": r[1], "domain": r[2], "occurred_at": r[3],
+        "id": r[0], "type": r[1], "domain": r[2],
+        "occurred_at": shown,
+        "occurred_at_utc": r[3],
         "entity": r[4], "data": data, "notes": r[6],
     }
-    if local:
-        out["occurred_at_local"] = local
+    if original and original != shown:
+        out["occurred_at_original"] = original
     if len(r) > 7:
-        out["created_at"], out["updated_at"] = r[7], r[8]
+        out["created_at"] = wmlib.local_iso(r[7]) if r[7] else r[7]
+        out["updated_at"] = wmlib.local_iso(r[8]) if r[8] else r[8]
     return out
 
 

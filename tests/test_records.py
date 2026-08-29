@@ -4,6 +4,7 @@
 Run: python3 tests/test_records.py   (from the package dir)
 """
 import json
+import os
 import pathlib
 import sqlite3
 import subprocess
@@ -23,9 +24,13 @@ def check(cond, label):
     checks += 1
 
 
+TZ = "Asia/Kolkata"   # pinned: display assertions must not depend on the host
+
+
 def run(root, *args, expect_ok=True):
+    env = dict(os.environ, WM_TZ=TZ, HERMES_HOME="/nonexistent-hermes-home")
     r = subprocess.run([sys.executable, RECORDS, "--root", str(root), *args],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=env)
     if expect_ok:
         assert r.returncode == 0, f"records.py {args} failed: {r.stderr}"
     return r
@@ -74,11 +79,12 @@ def test_utc_normalisation():
         "--occurred-at", "2026-08-21T09:30:00+05:30")  # the same instant
 
     all_rows = rows(root, "--domain", "d")
-    stamps = {r["occurred_at"] for r in all_rows}
-    check(len(stamps) == 1, f"same instant stored identically (got {stamps})")
-    ist = [r for r in all_rows if r["entity"] == "ist"][0]
-    check(ist["occurred_at_local"] == "2026-08-21T09:30:00+05:30",
-          "original offset preserved alongside the UTC form")
+    stored = {r["occurred_at_utc"] for r in all_rows}
+    check(stored == {"2026-08-21T04:00:00+00:00"},
+          f"same instant stored identically as UTC (got {stored})")
+    shown = {r["occurred_at"] for r in all_rows}
+    check(shown == {"2026-08-21T09:30:00+05:30"},
+          f"both DISPLAYED in the configured zone, never UTC (got {shown})")
 
     # Both are before the cutoff, so neither may come back.
     got = rows(root, "--domain", "d", "--since", "2026-08-21T05:00:00+00:00")
@@ -184,10 +190,12 @@ def test_migrate():
 
     got = rows(root, "--domain", "d")
     check([x["entity"] for x in got] == ["a", "b", "c"], "now ordered chronologically")
-    check(all(x["occurred_at"].endswith("+00:00") for x in got), "all stored as UTC")
+    check(all(x["occurred_at_utc"].endswith("+00:00") for x in got), "all stored as UTC")
+    check(all(x["occurred_at"].endswith("+05:30") for x in got),
+          "all displayed in the configured zone")
     check(got[0]["data"] == {"k": "a"}, "payload preserved")
-    check(got[0]["occurred_at_local"] == "2026-08-20T09:00:00+05:30",
-          "original offset recorded")
+    check(got[2]["occurred_at_original"] == "2026-08-20T02:00:00-05:00",
+          "an offset differing from the display zone is kept")
 
     # The legacy schema had no created_at/updated_at; opening must add them.
     check("created_at" in got[0], "missing columns added on open")

@@ -26,6 +26,7 @@ SUITES = [
     ("records store    ", "test_records.py"),
     ("reminder store   ", "test_reminders.py"),
     ("reminder tick    ", "test_reminder_check.py"),
+    ("todoist budget   ", "test_todoist_budget.py"),
     ("capture gate     ", "test_gate.py"),
     ("gate health      ", "test_gate_health.py"),
     ("reminder resolver", "test_reminder_resolver.py"),

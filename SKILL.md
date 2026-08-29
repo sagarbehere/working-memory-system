@@ -14,7 +14,7 @@ metadata:
 
 Personal second-brain system: the user captures thoughts via any connected
 client; you classify, file, retrieve, and remind. **The raw log is the
-immutable, full-text capture record and audit trail** (`~/working-memory/raw/`)
+immutable, full-text capture record and audit trail** (`$WM_ROOT/raw/`)
 — every capture is written there first, then routed to its store. Destinations
 (vault notes, SQLite rows, Todoist tasks) are the primary curated artifacts;
 **recovery is the backups' job** (vault git + nightly private-remote push + Todoist
@@ -82,12 +82,12 @@ supersedes: 20260817-1610-01
   **Low confidence → `record`.**
 
 Then route per the table (update `meta/tag-index.json` in the same operation,
-and commit `~/working-memory` after the batch):
+and commit the working-memory repo after the batch):
 
 | `type` | Destination | Mechanism |
 |---|---|---|
 | `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | **ONE command — never hand-edit `reminders.json`:** `python3 ~/.hermes/scripts/reminders.py add --message <text> --due-at <ISO-8601 with offset> --raw-entry-id <id> --origin-platform <p> --origin-chat <id> [--origin-thread <id>]`. It writes the durable local entry, then calls Todoist synchronously and records `todoist_id`/`mirrored: true`, and prints the finished entry as JSON. It takes the store lock, so it is safe against a concurrent cron tick. A failed mirror is not an error — the entry is durable and the cron catches it up. |
-| `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py --root ~/working-memory add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
+| `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
 | `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |

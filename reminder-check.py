@@ -121,8 +121,11 @@ def _tick(root, env):
     # disabled, and both take the store lock internally.
     mirrored = aged = closed = []
     if todoist.enabled():
+        # Mirroring is cheap and only runs when something is unmirrored;
+        # reconciliation is rate-limited (see reminders.reconcile_due).
         mirrored = rem.mirror_pending(root)
-        closed, aged = rem.reconcile(root)
+        if rem.reconcile_due(root):
+            closed, aged = rem.reconcile(root)
 
     fired, failed, fell_back = [], [], []
     for r in rem.due_now(root):

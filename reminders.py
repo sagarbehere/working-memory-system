@@ -44,6 +44,55 @@ STATUSES = ("pending", "fired", "done", "cancelled")
 # until it is checked off there. Without a horizon, one never-completed task
 # is polled forever and reconciliation cost only ever grows.
 DEFAULT_RECONCILE_HORIZON_DAYS = 30
+# Completion reconciliation is a convenience, not a correctness requirement:
+# nothing fires off the back of it, it only reflects a Todoist check-off into
+# the local store. Running it on every 5-minute tick spends 288 API calls a
+# day to shorten that lag; every 30 minutes costs 48 and nobody notices.
+DEFAULT_RECONCILE_EVERY_MINUTES = 30
+
+
+def state_path(root):
+    """Small cache: Todoist project id + last reconcile time. Disposable."""
+    return pathlib.Path(root) / "meta" / "todoist-state.json"
+
+
+def _load_state(root):
+    try:
+        with state_path(root).open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(root, state):
+    try:
+        wmlib.write_json_atomic(state_path(root), state)
+    except OSError:
+        pass  # a cache that cannot be written is not an error
+
+
+def project_id(root, tok):
+    """The Todoist project id, cached across runs.
+
+    Resolving it costs a full GET /projects, and it never changes — paying
+    that on every single capture doubled the API cost of writing a reminder.
+    A wrong cached id surfaces as a failed create, which clears it.
+    """
+    name = todoist.default_project()
+    state = _load_state(root)
+    if state.get("project_name") == name and state.get("project_id"):
+        return state["project_id"]
+    pid = todoist.ensure_project(name, tok)
+    state.update({"project_name": name, "project_id": pid})
+    _save_state(root, state)
+    return pid
+
+
+def _forget_project(root):
+    state = _load_state(root)
+    state.pop("project_id", None)
+    _save_state(root, state)
 
 
 def store_path(root):
@@ -89,6 +138,21 @@ def _find(reminders, rid):
     return None
 
 
+def for_display(entry):
+    """A copy with timestamps rendered in the configured zone.
+
+    Stored values keep whatever offset they were captured with (the instant
+    is what matters, and comparisons are timezone-aware); display always
+    normalises to WM_TZ so the user never reads someone else's offset.
+    Returns a COPY — callers print this, never write it back.
+    """
+    out = dict(entry)
+    for field in ("due_at", "created_at", "fired_at", "completed_at"):
+        if out.get(field):
+            out[field] = wmlib.local_iso(out[field])
+    return out
+
+
 # ------------------------------------------------------------------ add
 
 def add(root, message, due_at, raw_entry_id=None, origin=None, mirror=True):
@@ -124,7 +188,9 @@ def add(root, message, due_at, raw_entry_id=None, origin=None, mirror=True):
 
     if mirror and todoist.enabled():
         try:
-            task = todoist.create_task(entry["message"], due=entry["due_at"])
+            tok = todoist.token()
+            task = todoist.create_task(entry["message"], due=entry["due_at"],
+                                       tok=tok, project_id_=project_id(root, tok))
             with wmlib.FileLock(lock_path(root)):
                 reminders = load(root)
                 target = _find(reminders, entry["id"])
@@ -137,6 +203,8 @@ def add(root, message, due_at, raw_entry_id=None, origin=None, mirror=True):
                       reminder_id=entry["id"], todoist_id=entry["todoist_id"])
         except todoist.TodoistError as exc:
             # Not fatal: the durable entry exists and the next tick retries.
+            # Drop the cached project id in case that is what went stale.
+            _forget_project(root)
             wmlib.log(root, "reminders", "mirror", "failed",
                       reminder_id=entry["id"], error=str(exc))
             print(f"reminders: Todoist mirror deferred to cron: {exc}",
@@ -164,7 +232,7 @@ def mirror_pending(root, limit=None):
         todo = todo[:limit]
     try:
         tok = todoist.token()
-        pid = todoist.ensure_project(todoist.default_project(), tok)
+        pid = project_id(root, tok)
     except todoist.TodoistError as exc:
         wmlib.log(root, "reminders", "mirror", "failed", error=str(exc))
         return []
@@ -193,6 +261,28 @@ def mirror_pending(root, limit=None):
     return list(done)
 
 
+def reconcile_due(root, every_minutes=None):
+    """True when enough time has passed since the last reconcile.
+
+    The 5-minute tick exists for FIRING, which must be prompt. Completion
+    sync does not: it only mirrors a Todoist check-off back into the local
+    store, and nothing depends on the result. Rate-limiting it here is the
+    difference between 288 and 48 API calls a day.
+    """
+    if every_minutes is None:
+        try:
+            every_minutes = int(wmlib.wm_env().get(
+                "TODOIST_RECONCILE_MINUTES", DEFAULT_RECONCILE_EVERY_MINUTES))
+        except ValueError:
+            every_minutes = DEFAULT_RECONCILE_EVERY_MINUTES
+    if every_minutes <= 0:
+        return True  # 0 or negative = reconcile on every tick
+    last = wmlib.parse_iso(_load_state(root).get("last_reconcile_at"))
+    if last is None:
+        return True
+    return (wmlib.now() - last).total_seconds() >= every_minutes * 60
+
+
 def reconcile(root, horizon_days=DEFAULT_RECONCILE_HORIZON_DAYS):
     """Mark reminders done when their Todoist task is closed.
 
@@ -214,6 +304,11 @@ def reconcile(root, horizon_days=DEFAULT_RECONCILE_HORIZON_DAYS):
     except todoist.TodoistError as exc:
         wmlib.log(root, "reminders", "reconcile", "failed", error=str(exc))
         return [], []
+    # Record the attempt, not just successes — otherwise a persistently
+    # failing API would be retried on every tick, the opposite of the intent.
+    state = _load_state(root)
+    state["last_reconcile_at"] = wmlib.iso()
+    _save_state(root, state)
 
     now = wmlib.now()
     closed, aged = [], []
@@ -330,7 +425,7 @@ def main():
         entry = add(root, args.message, args.due_at,
                     raw_entry_id=args.raw_entry_id, origin=origin,
                     mirror=not args.no_mirror)
-        print(json.dumps(entry, ensure_ascii=False))
+        print(json.dumps(for_display(entry), ensure_ascii=False))
     elif args.cmd == "list":
         cutoff = wmlib.parse_iso(args.due_before) if args.due_before else None
         for r in sorted(load(root), key=lambda x: x.get("due_at") or ""):
@@ -340,12 +435,12 @@ def main():
                 due = wmlib.parse_iso(r.get("due_at"))
                 if due is None or due > cutoff:
                     continue
-            print(json.dumps(r, ensure_ascii=False))
+            print(json.dumps(for_display(r), ensure_ascii=False))
     elif args.cmd in ("done", "cancel"):
         status = "done" if args.cmd == "done" else "cancelled"
         extra = {"completed_at": wmlib.iso()} if status == "done" else {}
         entry = set_status(root, args.id, status, **extra)
-        print(json.dumps(entry, ensure_ascii=False))
+        print(json.dumps(for_display(entry), ensure_ascii=False))
     elif args.cmd == "mirror":
         done = mirror_pending(root)
         print(f"mirrored {len(done)} reminder(s)")
@@ -354,7 +449,7 @@ def main():
         print(f"reconciled {len(closed)} done, {len(aged)} aged out")
     elif args.cmd == "fire-due":
         for r in due_now(root, wmlib.parse_iso(args.at) if args.at else None):
-            print(json.dumps(r, ensure_ascii=False))
+            print(json.dumps(for_display(r), ensure_ascii=False))
     return 0
 
 
