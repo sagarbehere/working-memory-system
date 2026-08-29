@@ -1,98 +1,127 @@
-# Second Brain — Implementation Guide (for Hermes)
+# Second Brain — Decisions & Rejected Alternatives (v3.0.0)
 
-**Document map:** this file covers *build, storage-routing, and backup* — what gets written where, and how it's kept safe, for **v3.0.0**. For type/tag/status classification, see `second-brain-schema.md`. For capture, debounce, reminders, and crash-recovery plumbing (shared with v2.0.0), see `working-memory-system-spec-v3.md`.
+**What this document is for.** Everything here is knowledge you cannot recover
+by reading the code: choices that were made deliberately, alternatives that
+were considered and rejected, and things that are *absent on purpose*. An
+absence leaves no trace in a codebase — that is the whole reason this file
+still exists.
 
-**Status:** implementation spec, ready to build against, in the **v3.0.0 branch**.
-**Depends on:** `second-brain-schema.md` (the type/tag/status data model — read this first) and `working-memory-system-spec-v3.md` (the capture plumbing this guide reuses and adapts).
+**What it is NOT.** Not a description of how the system works — that drifts,
+and the code is the truth. Data model: `second-brain-schema.md`. Plumbing:
+`working-memory-system-spec-v3.md`. Orientation for coding agents:
+`CLAUDE.md`. This was a full implementation guide until 2026-08-29; the
+descriptive half was cut because it had started contradicting the code, as
+the two corrections below show.
 
-## 0. What this guide is
+---
 
-v2.0.0 (tagged, frozen — see `working-memory-system-spec.md` at that tag) already solved capture reliably; existing Reddit users keep running it unaffected by anything in this guide. v3.0.0 is a **separate branch**, with its own copy of the spec (`working-memory-system-spec-v3.md`), that reuses and adapts v2.0.0's plumbing rather than rebuilding it. This guide tells you precisely what to copy over unmodified, what to leave behind, and what's genuinely new for v3.0.0.
+## Left behind from v2.0.0 — deliberately absent
 
-## 1. Reuse as-is (copy over, adapt only where noted)
+- **`topics/<tag>.md` flat files.** Replaced by typed notes in the Obsidian
+  vault plus structured rows in SQLite. If you find code referencing a
+  `topics/` directory, it is v2 residue, not a feature. *(The consolidation
+  gate still had such a check in 2026-08-29; it was dead code and was
+  removed.)*
+- **"Collapse into a rolling summary" as the default consolidation behaviour.**
+  In v3 this applies only to Reference-flavoured content. **Structured Records
+  in SQLite are never collapsed** — the whole point of the records table is
+  itemised history you can query, and summarising it destroys exactly what it
+  exists for.
+- **Backfill and migration (decided 2026-08-27).** v3 starts fresh. Existing
+  wiki notes stay as they are with no tagging pass; v2 captures stay in the
+  frozen v2 line. New writes are schema-compliant going forward. Rejected
+  because a bulk retag is a large, risky, low-value operation on content the
+  user can upgrade one note at a time if they ever care to.
 
-These components carry over from v2.0.0 into the v3.0.0 branch with little to no change:
+### Correction (2026-08-29): reminders were NOT replaced by Todoist
 
-- **Debounce buffering** (Section 6) — message buffering, timer, manual flush override. Unchanged.
-- **Buffer durability** (`meta/pending-buffer.json`, Section 11) — unchanged.
-- **Extraction pass architecture** (Section 7) — the capture/question/command split and the "split multiple thoughts, don't fragment one" logic carry over unchanged. The mechanism (one LLM call per flushed buffer, context-aware tag reuse) is reused as-is; the output schema for capture items is extended — see §3 below.
-- **Command handling** (Section 8's "mis-filed"/"forget"/"merge-split" logic) — reuse the pattern, extended so a correction can touch an Obsidian note, a SQLite row, or a Todoist task, depending on where the original item was routed, instead of just a topic file. Same confirm-before-destructive-action rule for "forget entirely."
-- **Crash recovery & error handling** (Section 11) — logging format and retry-then-fallback-to-unfiled carry over unchanged. The reminder-delivery-during-downtime case now applies to Todoist sync instead of `reminders.json`.
-- **Refinement loop** (Section 17) — reuse the mechanism and its approval boundary (auto-tune numeric thresholds; require sign-off for policy changes) unchanged, additionally treating type-classification rules (§3 below), storage-routing rules (§4), and edits to the canonical domain-tag list as policy changes requiring sign-off.
-- **Packaging pattern** (Section 16) — SKILL.md + escalation pointer (spec = why, code = how, logs = what happened) is reused directly; add this guide and `second-brain-schema.md` as additional required-reading pointers in v3.0.0's own SKILL.md.
+An earlier version of this document said `reminders.json` and the cron script
+were "replaced by Todoist's API." **That is not what was built, and it would
+have been the wrong design.** Todoist is a *mirror*: it owns cross-device
+visibility and notification, but the local store remains the durable record
+and the firing source, so reminders keep working when Todoist is down,
+degraded, rate-limited, or removed. See spec §9 for the two-layer contract.
+The statement is corrected rather than deleted because it was load-bearing —
+an agent reading it could reasonably have deleted the local reminder layer.
 
-## 2. Leave behind — not carried into v3.0.0
+---
 
-- **`reminders.json` + cron reminder script** (Section 9 of the spec) — replaced by Todoist's API, which owns due dates, recurrence, and — critically — completion state, which the homegrown version never had. This component simply isn't part of the v3.0.0 branch; it remains exactly as-is in v2.0.0.
-- **`topics/<tag>.md` flat files** (Section 4/8) — replaced by writing directly into the existing Obsidian vault. Not part of v3.0.0.
-- **Consolidation's "collapse into rolling summary" behavior** (Section 8), as a default — in v3.0.0 this applies only to Reference-flavored content; structured Records stay itemized in SQLite, never collapsed.
+## Storage routing
 
-## 3. Extraction pass — extended output schema
+Canonical rules: `second-brain-schema.md` §10. Only the decisions here:
 
-For every item classified `capture`, add:
+- **The vault is the user's existing private git repo**, viewed through
+  Obsidian and Working Copy. Backup was therefore already solved; what needed
+  changing was the *skill* (frontmatter discipline), not the storage.
+- **Writes must commit AND push.** A local-only commit in a repo whose purpose
+  is syncing across devices is not backed up. This is a recurring failure mode,
+  which is why the nightly watchdog checks for unpushed vault commits.
+- **Todoist needs no backup infrastructure** beyond a nearly-free nightly
+  export, being reasonably trusted hosted infrastructure.
 
-- `second_brain_type`: one of `reminder | record | project | reference | idea`
-- if `record`: `record_kind`: `structured | narrative`
-- if `reference`: `subtype`: `entity | concept | procedure`
-- `domain`: 1+ tags, checked against the canonical list before coining a new one (see §5)
-- if `project` or `reference`: `status`, defaulting to `active`
-- if `record` or `reference` involves a file: `file_ref` (see §12 of the schema doc)
+---
 
-Classification heuristics: use §8 of `second-brain-schema.md` directly (structural cues — due date language → reminder, dated/factual/no action → record, open decision → project, "how do I"/stable entity → reference, musing/quote → idea). Default to `record` on low confidence, same as before.
+## Backup design
 
-## 4. Storage routing
+Four systems exist; only one needed new infrastructure. The reasoning matters
+more than the mechanism:
 
-**Storage routing is defined in `second-brain-schema.md` §10 (canonical)** —
-including the undated-task single-home rule and the 6a vault layout
-(`references/{entities,concepts,procedures}`, `records/`, `projects/`, `ideas/`).
-Build-relevant notes below.
+- **The public package repo must never contain personal data, even in
+  history.** This is a security boundary, not a fragmentation problem to
+  tidy up. Do not "simplify" by merging the data repo into it.
+- **The vault is a live sync target, not a cold-backup destination.** Folding
+  unrelated snapshots into it would bloat a repo that syncs to phones.
+- **A git repo on the VPS's own disk is not a backup.** That was the actual
+  gap, and it closes with one private remote plus one nightly push.
+- **Git history IS the point-in-time store**, so no snapshot pruning and no
+  continuous-replication tooling (Litestream was considered and rejected).
+  At personal scale — a database measured in tens of kilobytes — unbounded
+  history is a non-issue for years. Revisit only if volume actually becomes a
+  problem, not preemptively.
 
-**Obsidian vault:** already your private GitHub repo, viewed via Working Copy/Obsidian — backup is solved. What needs to change is the *skill*, not the storage: adjust the existing LLM Wiki skill so every write includes `type`, `domain`, `status` (where applicable), and `subtype` (for Reference) in frontmatter, matching `second-brain-schema.md`. Confirm the skill already commits+pushes after each write; if it only commits locally, add the push step — a local-only commit in a repo meant to sync across your devices isn't actually backed up until it's pushed.
+### Correction (2026-08-29): the live database is never replaced
 
-**Todoist:** reasonably trusted infrastructure per your own assessment — lower backup priority, no action needed beyond the API integration itself.
+An earlier version specified that the nightly snapshot "replaces `records.db`
+in the working tree, so every committed DB file is a consistent point-in-time
+copy." **That was implemented and it was a data-corruption bug.** The database
+runs in WAL mode; swapping the main file while connections are open leaves a
+stale `-wal` to be checkpointed against different content. Measured outcome:
+`PRAGMA integrity_check` reporting a broken index and 201 committed rows lost.
 
-## 5. Backup — one private remote on the existing repo, one nightly cron
+The live `records.db` is now never copied, moved, or replaced. The committed
+artifact is a separate `records-snapshot.db`, written by SQLite's backup API
+while the live file is only ever read, and `records.db*` is gitignored. See
+`tests/test_backup.py`, which exercises the checkpoint that made the old
+behaviour fail — without it the bug usually stayed invisible, which is what
+made it dangerous.
 
-Four systems exist in this design, and only one of them needs new backup infrastructure built for it — the other three are either already solved or must deliberately stay separate:
+---
 
-- **Working-memory-system code repo** (public, on Reddit — v2.0.0 tagged and frozen there) — **never** put personal data here, even in history. Stays fully separate; this is a security boundary, not a fragmentation problem to solve.
-- **Obsidian vault** (private repo, synced via Working Copy) — already backed up as a side effect of normal use. Don't fold other data into it; it's a live sync target, not a cold-backup destination, and adding unrelated binary snapshots would only bloat it. Confirm the LLM Wiki skill commits *and pushes* after each write — a local-only commit isn't actually backed up.
-- **Todoist** — SaaS-hosted, low priority per your own assessment. No dedicated backup infra needed, but see the optional export below since it's nearly free once the push cron exists.
-- **SQLite + residual `/working-memory/` folder** (raw log, `meta/`, `logs/`) — the folder is already a git repo (the capture pipeline auto-commits; on-box audit trail), but it has **no remote: a repo on the VPS's own disk is not a backup.** The one real gap closes by giving the existing repo a private remote and one nightly cron that pushes it:
+## Artifacts
 
-1. Nightly cron (`wm-backup-push.py`, Hermes no_agent job, 03:00): `records.py backup` — a safe SQLite snapshot, consistent against concurrent writes, unlike a raw copy — then the snapshot replaces `records.db` in the working tree, so every committed DB file is a consistent point-in-time copy.
-2. Same run: best-effort Todoist export (open tasks → JSONL) committed alongside as `todoist-export.json` — removes Todoist as a total blind spot despite its low priority.
-3. Same run: `git add -A && git commit && git push origin main` — the off-box copy lags the live repo by at most 24 h. Push failures and vault drift are the only output (the no_agent cron delivers alerts verbatim; a healthy night is silent).
-4. Same run: vault sync — fetch `~/wiki`, `pull --ff-only` when behind (devices push legitimately — silent), alert only when the VPS has unpushed local commits (ahead) or the pull fails (2026-08-29 refinement of decision 7), so a local-only vault commit can't go unnoticed.
-5. No snapshot pruning: git history IS the point-in-time store, covering the whole folder, not just the DB. History grows unbounded, but at personal scale (a ~30 KB DB today) this is a non-issue for years; no need for continuous-replication tooling (e.g. Litestream) unless volume actually becomes a real problem later.
+Files stay where the user already keeps them (an iCloud paperwork folder),
+untouched. A structured record stores a `file_ref` pointing at a **stable,
+never-renamed location** — deliberately not a path the user might reorganise,
+because a broken reference is worse than no reference. iCloud's own redundancy
+covers the files; no separate backup action was warranted.
 
-Setup (one-time, 2026-08-28): create an EMPTY private GitHub repo (`working-memory-backup`), add it as `origin` in `~/working-memory`, widen the fine-grained VPS PAT to include it, and register the cron job. The cron alerts nightly until the first successful push.
+---
 
-**Canonical domain-tag list placement:** move this into the Obsidian vault (e.g. a `_meta/tags.md` note) rather than `/working-memory/meta/tag-index.json` — it's already git-backed and synced there, one fewer thing the backup push needs to cover.
+## Deferred indefinitely
 
-## 6. Scope decision: no backfill or migration (2026-08-27)
+Built only if a real need appears, not speculatively: confidence decay on
+Reference/Project status, S3-backed artifact storage, nested domain tags, and
+the daily digest / surfacing layer. The digest in particular is referenced by
+`second-brain-schema.md` §11 but is **out of scope and not implemented** —
+treat any mention of it as a design note, not a description of the system.
 
-Decided: v3.0.0 **starts fresh**. Existing content is not backfilled or migrated:
+---
 
-- The existing LLM wiki notes stay exactly as they are — no tagging pass over them.
-- Existing v2.0.0 captures/topics stay in the frozen v2.0.0 line.
-- v3 writes typed, schema-compliant notes into the vault going forward; old notes may be upgraded later at the user's discretion, one at a time, if ever.
+## The refinement loop's approval boundary
 
-(Replaces the earlier "migrate the existing LLM Wiki" task; the section number is kept so later cross-references stay stable.)
-
-## 7. Artifacts
-
-Per `second-brain-schema.md` §12: files stay in your iCloud paperwork folder, untouched. A `record` (structured) row gets `file_ref` pointing at a stable, never-renamed location — not a path you might reorganize. iCloud's own redundancy covers the file itself; no separate backup action needed there.
-
-## 8. Build order
-
-1. **Extraction schema + SQLite + structured/narrative Record routing.** Reuse all capture plumbing unmodified. This alone fixes the retrieval failures that started this whole conversation (prescriptions, purchases).
-2. **Reference/Project routing into the Obsidian vault** — adjust the LLM Wiki skill for the new frontmatter, confirm push-after-commit.
-3. **Todoist integration** — the two-layer reminder scheduler (spec §9): the local store stays as the firing source and durable fallback; Todoist mirrors for cross-device visibility; completion is reconciled back at the daily digest.
-4. **Backups** (§5) — do this alongside step 1, not last; there's no reason the new SQLite data should go unbacked-up even during early testing.
-5. **Daily digest / surfacing layer** (schema doc §11) — only once 1-3 are stable and actually used for a few weeks.
-6. **Deferred, no timeline:** confidence decay on Reference/Project status, S3-backed artifact storage, nested domain tags — build only if a real need shows up.
-
-## 9. Escalation pointers for Hermes
-
-When a case isn't clearly covered by SKILL.md, consult in this order: this guide (routing/backup decisions), `second-brain-schema.md` (the type/tag/status model and why it's shaped this way), `working-memory-system-spec-v3.md` (capture plumbing rationale), then `logs/` (what actually happened on a specific past run). Same three-tier pattern as v2.0.0's spec, extended with the two new documents.
+`meta/refinement-log.md` (in the data repo) is a decision record and an async
+mailbox — not the channel where decisions get made. Numeric thresholds already
+flagged tunable may be auto-applied. **Classification rules, routing rules,
+storage-routing changes, edits to the canonical domain-tag list, and SKILL.md
+edits are policy** and need the user's sign-off with a before/after diff.
+Deterministic code is never self-edited outside that sanctioned flow.

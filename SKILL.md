@@ -86,7 +86,7 @@ and commit the working-memory repo after the batch):
 
 | `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | **ONE command — never hand-edit `reminders.json`:** `python3 ~/.hermes/scripts/reminders.py add --message <text> --due-at <ISO-8601 with offset> --raw-entry-id <id> --origin-platform <p> --origin-chat <id> [--origin-thread <id>]`. It writes the durable local entry, then calls Todoist synchronously and records `todoist_id`/`mirrored: true`, and prints the finished entry as JSON. It takes the store lock, so it is safe against a concurrent cron tick. A failed mirror is not an error — the entry is durable and the cron catches it up. |
+| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | **ONE command — never hand-edit `reminders.json`:** `python3 ~/.hermes/scripts/reminders.py add --message <text> --due-at <ISO-8601 with offset> --raw-entry-id <id> --origin-platform <p> --origin-chat <id> [--origin-thread <id>]`. It writes the durable local entry, then calls Todoist synchronously and records `todoist_id`/`mirrored: true`, and prints the finished entry as JSON. It takes the store lock, so it is safe against a concurrent cron tick. A failed mirror is not an error — the entry is durable and the cron catches it up. **Origin:** pass the chat's real `chat_id` and `thread_id` separately and do not guess — in a reserved lane you may omit `--origin-*` entirely and the store adopts the lane from `meta/lanes.json`. A `chat_id` that is actually a thread id is detected and corrected, and the correction is printed; if you see that message, you passed the wrong values. |
 | `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
 | `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
 | `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
@@ -185,6 +185,14 @@ and commit the working-memory repo after the batch):
   checked off is aged out after 30 days so it stops being polled forever.
 - "Mark X done" from the user → `reminders.py done --id <id>`; a reminder the
   user abandons → `reminders.py cancel --id <id>`.
+- Wrong message, time, or origin on an existing reminder →
+  `reminders.py update --id <id> [--message …] [--due-at …] [--repair-origin]`.
+  Never recreate it to fix a field: the id is what links it to its Todoist
+  task. `--repair-origin` re-checks the stored address against
+  `meta/lanes.json`.
+- A reminder whose delivery keeps failing escalates to the home channel after
+  3 attempts and logs `escalating` — that means its recorded origin is wrong;
+  fix it with `update --repair-origin` rather than waiting.
 
 ## Refinement loop
 

@@ -153,6 +153,71 @@ def for_display(entry):
     return out
 
 
+# --------------------------------------------------------------- origin
+
+def resolve_origin(root, origin):
+    """Validate (and where possible repair) a capture origin.
+
+    The agent constructs `origin` from whatever it can infer about the chat,
+    and it gets this wrong: an observed capture stored the lane's THREAD id
+    as chat_id, which reminder-check would then have used as a Telegram chat
+    address. Nothing downstream questioned it, because a present-but-wrong
+    chat_id looks exactly like a valid one.
+
+    Two repairs, both conservative:
+
+    * A chat_id that matches no reserved lane's chat but DOES equal some
+      lane's thread_id is the swap. Correct it to that lane.
+    * An empty/absent origin with exactly one reserved lane adopts it.
+
+    Deliberately NOT repaired: an unrecognised chat_id that collides with
+    nothing. Marker captures ("note ...") legitimately come from chats that
+    were never reserved, so an unknown chat is normal, not evidence of a bug.
+
+    Returns (origin, note_or_None).
+    """
+    origin = dict(origin or {})
+    lanes = wmlib.load_lanes(root)
+    if not lanes:
+        return origin, None
+
+    chat = str(origin.get("chat_id") or "").strip()
+    known_chats = {str(l.get("chat_id") or "") for l in lanes.values()}
+
+    if not chat:
+        if len(lanes) == 1:
+            lane = next(iter(lanes.values()))
+            origin.update({
+                "platform": origin.get("platform") or lane.get("platform") or "telegram",
+                "chat_id": str(lane.get("chat_id") or ""),
+                "thread_id": str(lane.get("thread_id") or ""),
+            })
+            return origin, f"origin defaulted to the only reserved lane ({origin['chat_id']})"
+        return origin, None
+
+    if chat in known_chats:
+        # Fill in a missing thread only when the chat has exactly one lane.
+        if not str(origin.get("thread_id") or "").strip():
+            matches = [l for l in lanes.values() if str(l.get("chat_id") or "") == chat]
+            if len(matches) == 1 and matches[0].get("thread_id"):
+                origin["thread_id"] = str(matches[0]["thread_id"])
+                return origin, f"thread_id filled in from the reserved lane for chat {chat}"
+        return origin, None
+
+    for lane in lanes.values():
+        if str(lane.get("thread_id") or "") == chat:
+            was = dict(origin)
+            origin.update({
+                "platform": lane.get("platform") or "telegram",
+                "chat_id": str(lane.get("chat_id") or ""),
+                "thread_id": str(lane.get("thread_id") or ""),
+            })
+            return origin, (
+                f"origin repaired: chat_id {chat!r} is a THREAD id, not a chat id "
+                f"(was {was}, now chat {origin['chat_id']} thread {origin['thread_id']})")
+    return origin, None
+
+
 # ------------------------------------------------------------------ add
 
 def add(root, message, due_at, raw_entry_id=None, origin=None, mirror=True):
@@ -168,6 +233,11 @@ def add(root, message, due_at, raw_entry_id=None, origin=None, mirror=True):
             "e.g. 2026-08-30T09:00:00+05:30")
     if not (message or "").strip():
         raise ValueError("--message must not be empty")
+
+    origin, note = resolve_origin(root, origin)
+    if note:
+        print(f"reminders: {note}", file=sys.stderr)
+        wmlib.log(root, "reminders", "origin", "repaired", detail=note)
 
     with wmlib.FileLock(lock_path(root)):
         reminders = load(root)
@@ -360,6 +430,44 @@ def set_status(root, rid, status, **fields):
     return target
 
 
+def update(root, rid, message=None, due_at=None, origin=None, repair_origin=False):
+    """Patch one reminder — the sanctioned way to fix a mis-recorded entry.
+
+    Without this, a reminder captured with a wrong origin could only be
+    cancelled and recreated (losing its Todoist mirror and its id), or fixed
+    by hand-editing the file the whole design forbids.
+    """
+    fields = {}
+    if message is not None:
+        if not message.strip():
+            raise ValueError("--message must not be empty")
+        fields["message"] = message.strip()
+    if due_at is not None:
+        due = wmlib.parse_iso(due_at)
+        if due is None:
+            raise ValueError(f"unparseable --due-at {due_at!r}: expected ISO-8601")
+        fields["due_at"] = due.isoformat(timespec="seconds")
+
+    with wmlib.FileLock(lock_path(root)):
+        reminders = load(root)
+        target = _find(reminders, rid)
+        if target is None:
+            raise ValueError(f"no reminder with id {rid}")
+        if origin is not None or repair_origin:
+            candidate = origin if origin is not None else target.get("origin")
+            fixed, note = resolve_origin(root, candidate)
+            fields["origin"] = fixed
+            if note:
+                print(f"reminders: {note}", file=sys.stderr)
+        if not fields:
+            raise ValueError("nothing to update: pass at least one field")
+        target.update(fields)
+        save(root, reminders)
+    wmlib.log(root, "reminders", "update", "ok",
+              reminder_id=rid, fields=sorted(fields))
+    return target
+
+
 def due_now(root, at=None):
     """Pending, past-due reminders that local firing owns.
 
@@ -406,6 +514,16 @@ def main():
         c = sub.add_parser(name, help=help_text)
         c.add_argument("--id", required=True)
 
+    u = sub.add_parser("update", help="patch a reminder (message, due, origin)")
+    u.add_argument("--id", required=True)
+    u.add_argument("--message")
+    u.add_argument("--due-at")
+    u.add_argument("--origin-platform")
+    u.add_argument("--origin-chat")
+    u.add_argument("--origin-thread")
+    u.add_argument("--repair-origin", action="store_true",
+                   help="re-validate the stored origin against meta/lanes.json")
+
     sub.add_parser("mirror", help="catch-up: mirror unmirrored pending reminders")
     rc = sub.add_parser("reconcile", help="sync completion state from Todoist")
     rc.add_argument("--horizon-days", type=int, default=DEFAULT_RECONCILE_HORIZON_DAYS)
@@ -436,6 +554,15 @@ def main():
                 if due is None or due > cutoff:
                     continue
             print(json.dumps(for_display(r), ensure_ascii=False))
+    elif args.cmd == "update":
+        origin = None
+        if args.origin_platform or args.origin_chat or args.origin_thread:
+            origin = {"platform": args.origin_platform or "telegram",
+                      "chat_id": args.origin_chat or "",
+                      "thread_id": args.origin_thread or ""}
+        entry = update(root, args.id, message=args.message, due_at=args.due_at,
+                       origin=origin, repair_origin=args.repair_origin)
+        print(json.dumps(for_display(entry), ensure_ascii=False))
     elif args.cmd in ("done", "cancel"):
         status = "done" if args.cmd == "done" else "cancelled"
         extra = {"completed_at": wmlib.iso()} if status == "done" else {}

@@ -91,13 +91,13 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
     refinement-log.md        # curated patterns worth reviewing (Section 17)
 ```
 
-**v3 change:** `topics/<tag>.md` flat files are left behind (implementation guide §2) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
+**v3 change:** `topics/<tag>.md` flat files are left behind (see "Left behind from v2.0.0" in the decisions doc) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
 
 - Raw log files are **never edited**, only appended to. Rotate monthly.
 - `tag-index.json` lets the agent find "which raw entries mention X" without re-reading every raw file.
 - `logs/` records operational events — distinct from `raw/`, which records *content*.
 - **Everything durable lives under this single `/working-memory/` directory.** A full backup is just archiving this one folder.
-- **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (implementation guide §5).
+- **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (see "Backup design" in the decisions doc).
 - **`records.db` and its `-wal`/`-shm` files are gitignored, deliberately.** A WAL-mode database committed live is torn, and swapping the file under open connections corrupts it — so the tracked artifact is `records-snapshot.db`, written by `sqlite3`'s backup API while the live database is only ever read. Restore with `cp records-snapshot.db records.db` with the gateway stopped.
 - **Timestamps:** everything stored for comparison is normalised to UTC (`records.occurred_at`, reminder `due_at` retains its offset but is compared as an aware datetime); everything user-facing is rendered in `WM_TZ`, defaulting to the machine's zone. No component hardcodes an offset.
 
@@ -167,7 +167,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 ## 8. Promotion & consolidation policy
 
-**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (implementation guide §4) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
+**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (schema §10 is canonical for routing) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
 
 **Consolidation (v3):** runs on a schedule or size threshold:
 - Reference-flavored content (procedures, entity pages) can be condensed like the old topic files — it's derived and regenerable.

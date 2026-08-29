@@ -27,5 +27,5 @@ The schema author ruled: **no schema change.** Comparison and Puzzle pages fit R
 ## Minor watch items
 
 - Dataview rollups (schema §5) are desktop-only — Obsidian on iOS can't run plugins; Hermes can render the rollup on request.
-- Backups: the ops-repo cron (implementation guide §5) is the only new infra; build alongside step 1.
+- Backups: the ops-repo cron (decisions doc, "Backup design") is the only new infra; build alongside step 1.
 - Classification accuracy is the load-bearing assumption — the early confirmation phase (spec §13) stays on.

@@ -83,18 +83,30 @@ def _git_commit(root, summary):
         print(f"  git commit failed: {exc}", file=sys.stderr, flush=True)
 
 
+# After this many consecutive failed sends, stop trusting the recorded origin
+# and deliver to the home channel instead. A MISSING origin already falls back;
+# a present-but-WRONG one did not, so a reminder addressed to a bad chat
+# retried into the void every 5 minutes and was never delivered or escalated.
+# (Observed: a capture stored the lane's thread id as its chat id.) Validating
+# the address up front is not possible here — marker captures legitimately come
+# from chats that were never reserved — so failure is the honest signal.
+FALLBACK_AFTER_FAILURES = 3
+
+
 def _resolve_target(reminder, default_chat, default_thread):
     """Pick the delivery address for a reminder.
 
     Origin (platform + chat_id + thread_id) is recorded at capture time.
-    Telegram origins deliver directly; anything else (or a missing origin)
-    falls back to the legacy lane / home channel. Returns
-    (chat_id, thread_id, fell_back).
+    Telegram origins deliver directly; anything else, a missing origin, or an
+    origin that has already failed repeatedly falls back to the legacy lane /
+    home channel. Returns (chat_id, thread_id, fell_back).
     """
     origin = reminder.get("origin") or {}
     platform = origin.get("platform") or "telegram"
     if platform != "telegram":
         # Non-Telegram origins are not deliverable by this standalone script.
+        return default_chat, default_thread, True
+    if reminder.get("send_failures", 0) >= FALLBACK_AFTER_FAILURES:
         return default_chat, default_thread, True
     if origin.get("chat_id"):
         return origin.get("chat_id"), origin.get("thread_id") or default_thread, False
@@ -149,10 +161,19 @@ def _tick(root, env):
                           origin=r.get("origin") or "legacy-lane")
             else:
                 failed.append(r["id"])
-                print(f"  send failed ({info}); leaving pending for next tick",
-                      file=sys.stderr, flush=True)
+                # Count the failure so a persistently bad address escalates to
+                # the home channel instead of retrying forever (see
+                # FALLBACK_AFTER_FAILURES).
+                n = int(r.get("send_failures", 0)) + 1
+                rem.set_status(root, r["id"], "pending", send_failures=n)
+                print(f"  send failed ({info}); leaving pending for next tick "
+                      f"(failure {n})", file=sys.stderr, flush=True)
                 wmlib.log(root, "reminder-cron", "fire", "failed",
-                          reminder_id=r["id"], error=str(info))
+                          reminder_id=r["id"], error=str(info), failures=n)
+                if n == FALLBACK_AFTER_FAILURES:
+                    wmlib.log(root, "reminder-cron", "fire", "escalating",
+                              reminder_id=r["id"],
+                              detail=f"{n} failures; next attempt uses the home channel")
         else:
             # stdout mode: the delivery payload IS stdout (the cron scheduler
             # delivers it verbatim to the home channel).

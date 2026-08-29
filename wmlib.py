@@ -207,6 +207,31 @@ def write_json_atomic(path, obj) -> None:
     tmp.replace(path)
 
 
+def load_lanes(root, env=None) -> dict:
+    """Reserved lanes: lane key ("platform:chat:thread") -> record.
+
+    Mirrors what the capture hook maintains in meta/lanes.json, plus the
+    legacy WM_TELEGRAM_CHAT_ID env seed, so other components can check an
+    address against the set of chats the user actually reserved. Read-only:
+    only the hook ever writes this file.
+    """
+    env = wm_env() if env is None else env
+    lanes = {}
+    try:
+        data = json.loads(
+            (pathlib.Path(root) / "meta" / "lanes.json").read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            lanes.update(data)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    legacy_thread = (env.get("WM_TELEGRAM_THREAD_ID") or "").strip()
+    for cid in (c.strip() for c in env.get("WM_TELEGRAM_CHAT_ID", "").split(",") if c.strip()):
+        lanes.setdefault(f"telegram:{cid}:{legacy_thread}", {
+            "platform": "telegram", "chat_id": cid,
+            "thread_id": legacy_thread, "reserved_at": "env-seed"})
+    return lanes
+
+
 class LockBusy(Exception):
     """Raised by FileLock(blocking=False) when another holder has the lock."""
 
