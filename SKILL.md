@@ -1,6 +1,6 @@
 ---
 name: working-memory
-description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'/'note'. Classify each capture (reminder/record/project/reference/idea), route to SQLite/vault/Todoist, retrieve from all stores, manage reminders."
+description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'/'note'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
 version: 3.0.0
 author: Sagar Behere
 license: MIT
@@ -16,7 +16,7 @@ Personal second-brain system: the user captures thoughts via any connected
 client; you classify, file, retrieve, and remind. **The raw log is the
 immutable, full-text capture record and audit trail** (`$WM_ROOT/raw/`)
 — every capture is written there first, then routed to its store. Destinations
-(vault notes, SQLite rows, Todoist tasks) are the primary curated artifacts;
+(vault notes, Todoist tasks) are the primary curated artifacts;
 **recovery is the backups' job** (vault git + nightly private-remote push + Todoist
 exports), not a rebuild from the log.
 
@@ -45,37 +45,32 @@ neither capture/question/command, and is answered normally — nothing filed.)
    **Command**.
 5. Chit-chat → answer normally.
 
-## Capture: raw entry first, then classify & route
+## Capture: transcript first, then classify & route
 
-**Write the raw entry FIRST — one command, never by hand:**
+**Append the capture verbatim FIRST — one command:**
 
 ```
-python3 ~/.hermes/scripts/rawlog.py add --text "<thought, marker stripped>" \
-  --type <reminder|record|project|reference|idea> --domain <canonical tags> \
-  [--tags …] [--status …] [--record-kind …] [--subtype …] [--file-ref …] \
-  [--supersedes <raw id>]        # see --help for the full field list
+python3 ~/.hermes/scripts/rawlog.py add --text "<the thought, marker stripped>"
 ```
 
-Prints `{"id": …, "duplicate": false}` — **pass that `id` as `raw_entry_id`
-when routing**; `"duplicate": true` means an identical capture landed within
-24h, so it is already filed: do not route it again. The CLI owns the format,
-the id, and dedup. Hand-writing into `raw/` risks a malformed header (the
-entry becomes invisible to consolidation, silently) or a colliding id (breaks
-the links back from reminders and records).
+That is the whole call: a timestamp and your words, nothing else. It prints
+`{"ts": …, "duplicate": false}`; `"duplicate": true` means an identical
+capture landed within 24h, so it is already filed — do not route it again.
 
-What you must decide before calling it:
+The transcript exists because **you are the unreliable part of this system**:
+if you mis-file a thought, or judge a real one to be chit-chat, the verbatim
+text is the only thing that survives your mistake. It carries no
+classification — the destination note does — and nothing links back to it.
 
-- **`--type`** — `reminder | record | project | reference | idea`. A capture
+Then classify the item and route it:
+
+- **`type`** — `reminder | record | project | reference | idea`. A capture
   with a due date splits into *two items*: a `record` for the event plus a
   `reminder` for the next due (schema §3.1's habit model).
-- **`--domain`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
+- **`domain`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
   (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). Classify against it first;
   coin a new tag only when nothing fits, adding it to that list in the same
   operation (a policy change → refinement log).
-- Type-specific: `--status` (project/reference), `--record-kind`
-  (records: `structured|narrative`), `--subtype` (references:
-  `entity|concept|procedure`), `--file-ref` (schema §12 — a stable location,
-  never a reorganizable path).
 - Heuristics (schema §8): due-date language → `reminder`; dated/factual/no
   action → `record`; open question/decision → `project`; "how do I"/stable
   entity → `reference`; musing/quote → `idea`; decision-time analysis →
@@ -83,82 +78,67 @@ What you must decide before calling it:
   puzzle → `reference` with difficulty/subject as domain tags.
   **Low confidence → `record`.**
 
-Then route per the table (commit the working-memory repo after the batch):
-
 | `type` | Destination | Mechanism |
 |---|---|---|
-| `reminder` | local `reminders.json` (+ synchronous Todoist mirror) | **ONE command — never hand-edit `reminders.json`:** `python3 ~/.hermes/scripts/reminders.py add --message <text> --due-at <ISO-8601 with offset> --raw-entry-id <id> --origin-platform <p> --origin-chat <id> [--origin-thread <id>]`. It writes the durable local entry, then calls Todoist synchronously and records `todoist_id`/`mirrored: true`, and prints the finished entry as JSON. It takes the store lock, so it is safe against a concurrent cron tick. A failed mirror is not an error — the entry is durable and the cron catches it up. **Origin:** pass the chat's real `chat_id` and `thread_id` separately and do not guess — in a reserved lane you may omit `--origin-*` entirely and the store adopts the lane from `meta/lanes.json`. A `chat_id` that is actually a thread id is detected and corrected, and the correction is printed; if you see that message, you passed the wrong values. |
-| `record` `structured` | SQLite `records` table | `python3 ~/.hermes/scripts/records.py add --type … --domain … --occurred-at <event date ISO-8601; now if unknown> --entity … --json '{…}' --notes …` |
-| `record` `narrative` | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
-| `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable — see schema §11, digest is out of scope for now) |
+| `reminder` | **Todoist** — the only reminder mechanism | `python3 ~/.hermes/scripts/todoist.py create --content <text> --due <ISO-8601 with offset>` (or `--due-string "friday 9am"`). Todoist notifies on every device; nothing fires locally. If the call fails, say so plainly — the capture is safe in the transcript but **the reminder does not exist**, so do not claim it was set. |
+| `record` — one-off | vault `records/` dated note | `records/YYYY-MM-DD-<slug>.md`, frontmatter + prose |
+| `record` — recurring series | **append to the series note** | A measurement or repeated observation (BP, headaches, weight) goes as ONE line appended to a single topical note, e.g. `records/blood-pressure.md` — never a note per reading. Keep the line consistently formatted (date first, then values) so the whole history reads as a table. |
+| `project` | vault `projects/` note | `status: active` frontmatter (+ `target_date`, `last_touched` if applicable) |
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
-| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (`todoist_only: true`, no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` section at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body (no Todoist mirror unless it later acquires a due date → then reminder rules apply) |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body |
 
 **Vault write discipline (all vault destinations):**
 - v3 notes **ARE wiki pages**: add an index.md entry under the page's type
   section + a log.md line; frontmatter per the vault SCHEMA; link related notes
   when natural (no forced minimum).
 - Frontmatter: `type`, `domain`, `status` (where applicable), `subtype`
-  (references), `record_kind` (records), `created`/`updated`.
+  (references), `created`/`updated`.
 - **Commit AND push in the vault (`WM_VAULT_PATH`, default `~/wiki`) after every write** — a local-only commit in a
   sync repo isn't backed up.
-- `records.py` is deterministic — for structured records ALWAYS use it (it
-  handles JSON escaping and indexing); never hand-edit `records.db`.
 
 **Confirm** with ONE short line after each flush — **showing the destination**:
 `✅ → Todoist: buy stamps` · `✅ → wiki (project): renew passport` ·
-`✅ → wiki (checklist): WM — X` · `✅ record (SQLite): BP 128/82` ·
+`✅ → wiki (checklist): WM — X` · `✅ → wiki (series): BP 128/82` ·
 `✅ → wiki (concept): …`. If the user says
 "No, that should be a project note / a Todoist task", re-route on the spot.
 
-## Retrieve (spec §12 — pick the store by what's asked)
+## Retrieve (pick the store by what's asked)
 
-- **Reminder queries** ("what's due this week", "did I take it?") → local
-  `reminders.py list` (`--status all` for history), soonest-first.
-  "Did it get done" →
-  cross-check completion in Todoist. Manual Todoist tasks → answer from Todoist.
-- **Completion history** ("what did I finish last month", "did I get X done?")
-  → `todoist.py completed --since YYYY-MM-DD --until YYYY-MM-DD [--project NAME]`
-  (completion-date view; `--by due` for the due-date view). Answer
-  conversationally, grouped by project.
-- **Task details incl. comments** → `todoist.py list --notes` (adds a
-  `comments` array per task; note_count is unreliable in v1, so it fetches
-  per task).
-- **Structured records** ("when did I last buy X", "BP last month") →
-  `records.py query --domain … --entity … --since … --until …`; answer
-  conversationally. Prescription overlap → pull rows, diff `data_json` in
-  reasoning.
-- **Undated tasks** ("what errands are pending") → Todoist for `todoist_only`
-  items, vault `projects/` for project notes.
-- **Vault content** (project/reference/idea/narrative record) → search vault
-  by title/backlink/domain tag. Exclude `status: archived|superseded` from
+- **Reminders / what's due** → `todoist.py list` (add `--notes` for comments).
+  Todoist holds every reminder; there is no local reminder store.
+- **Completion history** ("what did I finish last month") →
+  `todoist.py completed --since YYYY-MM-DD --until YYYY-MM-DD [--project NAME]`
+  (`--by due` for the due-date view). Answer conversationally, grouped by project.
+- **Measurements and series** ("BP last month", "when did the headaches
+  cluster") → read the series note in the vault and reason over it directly.
+  It is a small file; you are the query engine, so correlate and summarise
+  rather than just quoting lines.
+- **Undated tasks** → Todoist for errands, vault `projects/` for project notes.
+- **Vault content** (project/reference/idea/record) → search the vault by
+  title/backlink/domain tag. Exclude `status: archived|superseded` from
   default answers (surface if explicitly asked).
-- **Fallback / everything else** → raw log:
-  `rawlog.py search --tag X | --text "…" | --type … [--since …]`, or
-  `rawlog.py recent`. Never read `raw/` by hand and never make the user guess
-  a tag or type.
+- **Fallback — "did I ever say…"** → `rawlog.py search --text "…" [--since …]`.
+  This is the transcript of what you actually said, so it answers questions
+  the filed notes cannot. Never read `raw/` by hand.
 
 ## Command (run immediately)
 
-- Mis-filed → re-route to the correct store. Use the CLIs, never hand-edits:
-  `records.py update --id N [--type|--domain|--entity|--occurred-at|--notes]
-  [--json '{…}' merges | --replace-json '{…}' overwrites]` for a SQLite row;
-  edit the vault note in place; `reminders.py`/`todoist.py` for the others.
-- Merge/split vault notes → regenerate the named notes from raw.
-- Forget X → **confirm first** (the one destructive action), then strike the
-  raw entry AND remove derived artifacts: `records.py delete --id N` (or a
-  filter — run it with `--dry-run` first and show the user what matches),
-  `reminders.py cancel --id`, `todoist.py delete --id`, and the vault note.
-  `delete` refuses to run without `--id` or a filter, so it can never
-  become "delete everything".
+- Mis-filed → move it: edit or relocate the vault note; for a reminder,
+  `todoist.py delete --id <id>` and recreate it correctly.
+- Merge/split vault notes → edit them directly; the transcript is untouched.
+- Forget X → **confirm first** (the one destructive action), then remove the
+  derived artifacts: the vault note, and any Todoist task (find it by content
+  — `todoist.py list`, then `delete --id`). The transcript is append-only and
+  is NOT edited; say so plainly rather than implying the words are gone.
 - Ambiguous target → ask, never guess.
 
 ## Consolidation (v3, nightly job + size triggers)
 
 - Reference-flavored vault notes: condense like v2 topic files (derived,
   regenerable).
-- **Structured records in SQLite are never collapsed** — itemized history.
+- **Series notes are never collapsed** — a measurement history is the point;
+  summarising it destroys what it exists for.
 - Supersession: newer replaces older; `status: superseded` suppresses from
   defaults.
 - Expiry: resolved reminders / time-bound lines drop from derived notes; raw
@@ -166,36 +146,21 @@ Then route per the table (commit the working-memory repo after the batch):
 - The nightly gate (`wm-consolidation-gate.py`) prints a digest only when
   there's work; a silent night is normal.
 
-## Reminders (v3 — local first, Todoist mirrors)
+## Reminders (Todoist only)
 
-- **`reminders.py` owns `reminders.json` — never edit that file by hand**
-  (the same rule as `records.db`/`records.py`). Two processes write it, you
-  and the cron tick; the CLI takes the lock that makes them safe, and a
-  hand-written edit does not. Commands: `add`, `list [--status …]`,
-  `done --id`, `cancel --id`, `fire-due`.
-- **Local `reminders.json` is the firing fallback and durable record** — the
-  cron (`reminder-check.py`) fires only entries WITHOUT a successful mirror.
-- **Todoist (config-gated):** `reminders.py add` mirrors **synchronously at
-  capture time** and records `todoist_id` / `mirrored: true`. If that call
-  fails, the entry is still durable and `reminder-check.py`'s tick mirrors it
-  on a later run — a catch-up, not the primary path.
-  `mirrored: true` → **local firing is skipped** — Todoist's notification IS
-  the reminder; local fires only when the mirror is absent or failed
-  (Todoist down, token missing, degraded). One notification, from the healthy
-  layer.
-- Completion: user checks off in Todoist → reconciliation marks the matching
-  local entry `done` (in the reminder-check pass). A mirrored reminder never
-  checked off is aged out after 30 days so it stops being polled forever.
-- "Mark X done" from the user → `reminders.py done --id <id>`; a reminder the
-  user abandons → `reminders.py cancel --id <id>`.
-- Wrong message, time, or origin on an existing reminder →
-  `reminders.py update --id <id> [--message …] [--due-at …] [--repair-origin]`.
-  Never recreate it to fix a field: the id is what links it to its Todoist
-  task. `--repair-origin` re-checks the stored address against
-  `meta/lanes.json`.
-- A reminder whose delivery keeps failing escalates to the home channel after
-  3 attempts and logs `escalating` — that means its recorded origin is wrong;
-  fix it with `update --repair-origin` rather than waiting.
+- **Todoist is the reminder mechanism, not a mirror.** There is no local
+  reminder store and nothing fires from this box; Todoist notifies on every
+  device. If `TODOIST_API_TOKEN` is unset, reminders are unavailable — say so
+  rather than pretending to set one.
+- Create: `todoist.py create --content <text> --due <ISO-8601 with offset>`,
+  or `--due-string "friday 9am"` when the user's phrasing is natural language
+  and unambiguous. Report failure plainly; the transcript keeps the words but
+  the reminder will not exist.
+- "Mark X done" → `todoist.py list` to find the id, then
+  `todoist.py close --id <id>`. Abandoned → `todoist.py delete --id <id>`.
+- "What's due" → `todoist.py list`, soonest first.
+- Recurring reminders: use Todoist's own recurrence via `--due-string`
+  ("every monday 9am"). Do not hand-roll regeneration.
 
 ## Refinement loop
 
@@ -217,8 +182,8 @@ Approval boundary:
   do-then-inform, schema §6) — present a before/after diff and WAIT.
 - **Sanctioned code flow (your approval):** on approval of a `CODE
   IMPROVEMENT` entry, implement on `main` — spec + skill + code
-  together (docs describe the actual system), run the records.py round-trip
-  test, commit + push. Nothing goes live without your go.
+  together (docs describe the actual system), run `tests/run_all.py`,
+  commit + push. Nothing goes live without your go.
 - **Never self-patch:** deterministic code outside that sanctioned flow —
   flag it, don't edit unsupervised.
 

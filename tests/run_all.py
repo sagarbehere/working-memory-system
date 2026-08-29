@@ -23,17 +23,13 @@ TESTS = PKG / "tests"
 
 SUITES = [
     ("wmlib            ", "test_wmlib.py"),
-    ("raw log          ", "test_rawlog.py"),
-    ("records store    ", "test_records.py"),
-    ("reminder store   ", "test_reminders.py"),
-    ("reminder tick    ", "test_reminder_check.py"),
-    ("origin + delivery ", "test_origin.py"),
+    ("raw transcript   ", "test_rawlog.py"),
     ("todoist budget   ", "test_todoist_budget.py"),
     ("capture gate     ", "test_gate.py"),
     ("gate health      ", "test_gate_health.py"),
-    ("reminder resolver", "test_reminder_resolver.py"),
     ("backup push      ", "test_backup.py"),
     ("debounce hook    ", "test_debounce.py"),
+    ("no vestigial refs", "test_no_vestigial_refs.py"),
 ]
 
 

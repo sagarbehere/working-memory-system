@@ -15,12 +15,13 @@ Work signals checked (all file-based, read-only):
   2. raw month files older than WM_RAW_RETENTION_DAYS (rotation due)
   3. log files older than 30 days (deletion due)
   4. refinement-log entries with STATUS: PENDING APPROVAL
-  5. OPERATIONAL HEALTH (v3, added 2026-08-28): reminder-send failures,
-     todoist mirror/reconcile failures, extraction fallbacks since the last
-     consolidation; reminders.json anomalies (mirrored-without-id, unknown
-     status); records.db integrity. Emitted as a separate "Health issues"
+  5. OPERATIONAL HEALTH: failure lines logged since the last consolidation
+     (capture-gate, rawlog, todoist). Emitted as a separate "Health issues"
      block, only when something is actually off — a healthy system stays
      silent, so the nightly AI call is still skipped.
+
+     Store-shaped health checks were removed with the stores themselves in
+     the 2026-08-29 cut; reminders live in Todoist now.
 """
 
 import datetime as _dt
@@ -169,8 +170,8 @@ def pending_approvals(root: str) -> int:
 def health_issues(root: str, since, entries: list) -> list:
     """Operational health checks — return real problems only (silent when healthy).
 
-    Local-only by design: the gate never calls external APIs. Mirror/reconcile
-    failures surface here via the log lines the other components already write.
+    Local-only by design: the gate never calls external APIs. Todoist failures
+    surface here via the log lines the capture path already writes.
     """
     issues = []
 
@@ -185,46 +186,6 @@ def health_issues(root: str, since, entries: list) -> list:
             fail_counts[key] = fail_counts.get(key, 0) + 1
     for (comp, ev), n in sorted(fail_counts.items()):
         issues.append(f"{comp} {ev}: {n} failure(s) since last consolidation")
-
-    # 2. reminders.json structural sanity
-    rem_path = os.path.join(root, "reminders.json")
-    if os.path.isfile(rem_path):
-        try:
-            with open(rem_path) as f:
-                reminders = json.load(f)
-            inconsistent = [
-                r.get("id") for r in reminders
-                if r.get("mirrored") and not r.get("todoist_id")
-            ]
-            # Kept in step with reminders.STATUSES — 'cancelled' was missing
-            # here, so every cancelled reminder was reported as an anomaly.
-            unknown_status = [
-                r.get("id") for r in reminders
-                if r.get("status") not in ("pending", "fired", "done", "cancelled")
-            ]
-            if inconsistent:
-                issues.append("reminders marked mirrored but missing todoist_id: "
-                              + ", ".join(map(str, inconsistent)))
-            if unknown_status:
-                issues.append("reminders with unknown status: "
-                              + ", ".join(map(str, unknown_status)))
-        except (OSError, ValueError) as exc:
-            issues.append(f"reminders.json unreadable: {exc}")
-
-    # 3. records.db integrity (stdlib sqlite3; missing DB = nothing to check)
-    db_path = os.path.join(root, "records.db")
-    if os.path.isfile(db_path):
-        try:
-            import sqlite3
-            con = sqlite3.connect(db_path)
-            try:
-                row = con.execute("PRAGMA integrity_check").fetchone()
-                if row and row[0] != "ok":
-                    issues.append(f"records.db integrity check: {row[0]}")
-            finally:
-                con.close()
-        except Exception as exc:
-            issues.append(f"records.db check failed: {exc}")
 
     return issues
 

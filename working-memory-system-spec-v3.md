@@ -19,11 +19,11 @@ Capture works identically on every client — Telegram, a web UI (via the api_se
 1. **Capture gate** — a small hook on the base adapter's inbound seam (the shared path every platform's message passes through) that detects working-memory input (Section 2) and buffers it (Section 6) before anything else happens.
 2. **Extraction/tagging pass** — LLM call that reads a flushed buffer, splits it into items, classifies each as capture or question, and for captures produces: freeform tags, entry type, and (if applicable) a reminder directive and/or supersession flag.
 3. **Raw log** — append-only, immutable, timestamped. Ground truth.
-4. **Typed destinations** — the Obsidian vault (project/reference/idea/narrative-record notes) and SQLite (`records.db`, via `records.py`). Derived and regenerable; not authoritative. *(v3 replaced v2's flat `topics/<tag>.md` files with these — see §4.)*
+4. **Typed destinations** — the Obsidian vault (project/reference/idea/record notes) and Todoist (reminders and errands). Derived and regenerable; not authoritative. *(v3 replaced v2's flat `topics/<tag>.md` files with vault notes — see §4.)*
 5. **Promotion/consolidation pass** — background job that routes recurring or important captures into typed notes and periodically condenses the reference-flavoured ones. Gated by `wm-consolidation-gate.py`, which stays silent when there is no work.
-6. **Reminder scheduler** — separate from note storage; fires a message at the right time, to the chat where the reminder was captured. The store is owned by `reminders.py` (§9).
+6. **Reminders** — created directly in Todoist, which notifies every device (§9). Nothing fires from this machine.
 7. **Retrieval handler** — answers a question by searching the right store (§12), not by the user browsing anything.
-8. **Deterministic layer** — `wmlib.py` (env, timezone, logging, locking) plus the CLIs above. The agent never hand-edits `reminders.json` or `records.db`; both have a tool, and the tools hold the locks.
+8. **Deterministic layer** — `wmlib.py` (env, timezone, logging, locking), `rawlog.py`, and `todoist.py`. The agent calls tools; it never hand-writes `raw/`.
 
 ---
 
@@ -77,66 +77,56 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
     2026-08.md              # one file per month, append-only
     2026-09.md
     archive/                 # rotated-out raw files older than the retention window (Section 10)
-  reminders.json             # local reminder store — written ONLY via reminders.py (§9)
-  records.db                 # structured records, SQLite/WAL — written ONLY via records.py
-  records-snapshot.db        # nightly consistent copy of records.db; THIS is what git tracks
-  todoist-export.jsonl       # nightly export of open Todoist tasks
+  todoist-export.jsonl       # nightly export of open Todoist tasks (their only off-box copy)
   logs/
     2026-08.log               # one file per month — diagnostic, not memory (Section 11)
   meta/
     pending-buffer.json      # unflushed per-chat message buffer (Section 11)
     lanes.json               # reserved chats (Section 2)
-    reminders.lock           # flock serialising the agent and the cron tick (§9)
-    rawlog.lock              # flock serialising concurrent raw-log appends (§5)
+    rawlog.lock              # flock serialising concurrent transcript appends (§5)
     todoist-state.json       # disposable cache: project id + last reconcile (gitignored)
     refinement-log.md        # curated patterns worth reviewing (Section 17)
 ```
 
-**v3 change:** `topics/<tag>.md` flat files are left behind (see "Left behind from v2.0.0" in the decisions doc) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
+**v3 change:** `topics/<tag>.md` flat files are left behind (see "Left behind from v2.0.0" in the decisions doc) — derived content now routes to the Obsidian vault as typed notes. The `/working-memory/` folder keeps only the raw transcript, `meta/`, and `logs/`.
 
 - Raw log files are **never edited**, only appended to. Rotate monthly.
-- **Raw-log search is `rawlog.py search` / `recent`** — a scan over the monthly files, which is fast at personal scale. An inverted index (`meta/tag-index.json`) existed until 2026-08-29 and was **removed**: no code read or maintained it, only the agent did, so it could drift out of step with `raw/` and the only symptom was retrieval quietly missing things. Note this is NOT the canonical tag *vocabulary*, which lives at `_meta/tags.md` in the vault and is unaffected.
+- **Transcript search is `rawlog.py search`** — a scan over the monthly files, fast at personal scale. An inverted index existed until 2026-08-29 and was removed: no code maintained it, only the agent did, so it could drift out of step with `raw/` and the only symptom was retrieval quietly missing things. That index is NOT the canonical tag *vocabulary*, which lives at `_meta/tags.md` in the vault and is unaffected.
 - `logs/` records operational events — distinct from `raw/`, which records *content*.
 - **Everything durable lives under this single `/working-memory/` directory.** A full backup is just archiving this one folder.
 - **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (see "Backup design" in the decisions doc).
-- **`records.db` and its `-wal`/`-shm` files are gitignored, deliberately.** A WAL-mode database committed live is torn, and swapping the file under open connections corrupts it — so the tracked artifact is `records-snapshot.db`, written by `sqlite3`'s backup API while the live database is only ever read. Restore with `cp records-snapshot.db records.db` with the gateway stopped.
-- **Timestamps:** everything stored for comparison is normalised to UTC (`records.occurred_at`, reminder `due_at` retains its offset but is compared as an aware datetime); everything user-facing is rendered in `WM_TZ`, defaulting to the machine's zone. No component hardcodes an offset.
+- **Timestamps:** every stored timestamp is timezone-aware; everything user-facing is rendered in `WM_TZ`, defaulting to the machine's zone. No component hardcodes an offset.
 
 ---
 
 ## 5. Raw log entry format
 
-**`rawlog.py` owns this format and is the only supported writer** (added
-2026-08-29). The layout below is the storage contract; the code enforces it.
-It previously lived only in SKILL.md, leaving the agent to reproduce a
-structured header by hand — which risks two silent failures: a malformed
-header does not match the consolidation gate's `^##\s+(\S+)`, so the entry is
-never consolidated and nothing reports it; and a hand-derived id suffix can
-collide, breaking the `raw_entry_id` links reminders and records point back
-with. Entries are delimited by the header, not by the trailing `---`, so a
-body containing its own `---` line is preserved intact.
+An append-only **verbatim transcript**: a timestamp and exactly what the user
+said. `rawlog.py` owns this format and is the only supported writer.
 
 ```
-## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
-tags: health, vitamin-d
-type: reminder
-domain: health, vitamin-d
-supersedes: 20260817-1610-01
+## 2026-08-29T16:03:00+05:30
 
 Took vitamin D pill. Next one due in a week.
-
----
 ```
 
-- **id** — deterministic, timestamp-based.
-- **tags** — freeform, assigned by the extraction pass. No fixed vocabulary.
-- **type** — the v3 classification itself: `reminder | record | project |
-  reference | idea`. (v2's `log/reminder/log+reminder` is gone: a capture with
-  a due date splits into two items — a `record` for the event + a `reminder`
-  for the next due, per schema §3.1's habit model.)
-- **domain** — 1+ tags from the canonical list (`_meta/tags.md` in the vault).
-- **status / record_kind / subtype / file_ref** — as classified per §7.
-- **supersedes** — optional, raw entry id of a prior entry this one updates or replaces.
+That is the whole entry. It carries no classification — the destination note
+does — and no id, because nothing links back to it.
+
+**Why it is verbatim and nothing more (2026-08-29).** The transcript's single
+job is to sit *upstream of the agent's judgment*. The vault's git history
+records changes to what was filed; only this log records what was said, which
+is what makes a misclassification — or a thought wrongly judged to be
+chit-chat — recoverable instead of silently lost. It used to carry ids and
+typed fields so that entries in other stores could link back to it; those
+stores are gone, so the ids and fields went with them.
+
+- Entries are delimited by the header, **never** by the trailing `---`:
+  captured text legitimately contains such a line, and treating it as a
+  terminator truncated the entry on read.
+- Entries written before the cut carry `[id: …]` and field lines. They still
+  parse: the transcript is append-only, so formats coexist forever.
+- Reading it: `rawlog.py search --text … [--since …]`. Never by hand.
 
 ---
 
@@ -161,7 +151,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 - Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — the classification per `second-brain-schema.md` (the **`type` field itself carries the v3 class**; no separate `second_brain_type`):
   - `type`: `reminder | record | project | reference | idea`
-  - if `record`: `record_kind`: `structured | narrative`
+  - if `record`: whether it belongs to an existing series note or is a one-off dated note (schema §9)
   - if `reference`: `subtype`: `entity | concept | procedure`
   - `domain`: 1+ flat tags, checked against the canonical list before coining a new one
   - if `project` or `reference`: `status`, defaulting to `active`
@@ -170,7 +160,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 - **Habit captures split** per schema §3.1: "took vitamin D, next due Friday" →
   two items — a `record` (the completion) + a `reminder` (the next due).
 - Classification heuristics: the structural cues from `second-brain-schema.md` §8 (due-date language → reminder; dated/factual/no action → record; open question/decision → project; "how do I"/stable entity → reference; musing/quote → idea). **Low confidence defaults to `record`** — cheapest to fix later, nothing silently lost.
-- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these topics," "forget X") — handed to consolidation (Section 8), never producing a raw log entry. Corrections can now touch whichever store the original item was routed to (a vault note, a SQLite row, or a Todoist task) — same confirm-before-destructive rule.
+- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these notes," "forget X") — handed to consolidation (Section 8), never producing a transcript entry. Corrections touch whichever destination the original item was routed to (a vault note or a Todoist task) — same confirm-before-destructive rule. The transcript itself is never edited.
 - Splitting is conservative — one coherent thought touching two tags stays one entry; split only for genuinely unrelated content.
 - One LLM call per flushed buffer, kept cheap and fast.
 
@@ -182,7 +172,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 **Consolidation (v3):** runs on a schedule or size threshold:
 - Reference-flavored content (procedures, entity pages) can be condensed like the old topic files — it's derived and regenerable.
-- Structured Records in SQLite stay itemized and are never collapsed — they are queryable history, not prose.
+- Series notes (BP, headaches) stay itemized and are never collapsed — a measurement history is the point, and summarising destroys it.
 - Supersession: a newer fact replaces the older line (`supersedes`); `status: superseded` on vault notes suppresses them from default answers.
 - Expired lines drop (resolved reminders, "due in a week" facts); the raw entry itself is untouched.
 
@@ -192,16 +182,30 @@ Fully reversible — derived content regenerates from the raw log, so "that's mi
 
 ---
 
-## 9. Reminder scheduler
+## 9. Reminders
 
-Separate mechanism from note storage. Built on the VPS's existing cron and Hermes's existing messaging integration — no new scheduler daemon. **Two layers (v3):**
+**Todoist is the reminder mechanism.** The agent creates the task directly
+(`todoist.py create --content … --due …`); Todoist owns the due date,
+recurrence, completion state, and the notification to every device. Nothing
+fires from this machine, and there is no local reminder store.
 
-- **Local store (`reminders.json`)** — the source of truth for *firing* and the durable fallback: flat list of `{id, due_at, message, raw_entry_id, status, origin: {platform, chat_id, thread_id?}, mirrored, todoist_id, created_at}`. Status is one of `pending | fired | done | cancelled`. A cron entry checks this file and, for any due entry, sends the message to the reminder's **origin** — the chat where it was captured; if that address is unreachable (e.g. a deleted chat), it falls back to a configured home channel. Overdue pendings fire as soon as the VPS is back up. On firing, mark `status: fired`. If Todoist is down, degraded, or removed, reminders keep working unchanged from here.
-- **`reminders.py` owns the file (added 2026-08-29).** The store has two independent writers — the agent at capture time, and the cron tick — so it gets a deterministic CLI exactly as structured records get `records.py`, and the same rule: never hand-edit `reminders.json`. Every mutation takes `meta/reminders.lock`, which both writers share. The tick previously held a lock the agent knew nothing about, so it serialised tick-against-tick but not against the writer it actually raced: a capture landing between the tick's read and its write-back was silently erased, and the tick's critical section spans Todoist network calls.
-- **Todoist (mirror / UI layer)** — every reminder Hermes creates is also written to Todoist **synchronously, at capture time**: `reminders.py add` writes and fsyncs the durable local entry FIRST, then makes the Todoist call **outside the lock** (a hung API must not block a capture), then patches `todoist_id`/`mirrored: true` in under a fresh lock. A crash mid-mirror therefore leaves a durable un-mirrored reminder, never a lost one. If the call fails or is skipped, `reminder-check.py`'s tick mirrors any pending reminder still missing `todoist_id` — a catch-up, not the primary path. Todoist provides cross-device visibility, the mobile apps, and notifications; it does **not** gate firing.
-- **Reconciliation and its horizon.** The tick fetches all open Todoist task ids in ONE request and treats any mirrored reminder no longer in that set as completed (this was one GET per mirrored reminder per tick, so cost grew with the backlog and never fell). A mirrored reminder stays `pending` locally until checked off in Todoist, so one never-completed task would be polled forever; after 30 days past due it is aged out to `fired` and stops being polled.
-- **Consistency contract:** write local first (durable), then mirror to Todoist; on drift, Todoist's completion state wins for done-ness, the local store wins for firing. Tasks created manually in Todoist (not by Hermes) have no local mirror entry.
-- Recurring reminders should regenerate their next `due_at` automatically once the agent recognizes the pattern (nice-to-have, not required).
+**Why (2026-08-29 cut).** v3 originally kept `reminders.json` plus a
+five-minute cron tick as a durable firing layer, with Todoist as a mirror.
+That existed to serve deployments without a Todoist account — a configuration
+the author does not run. It cost roughly 18% of the codebase and produced most
+of the system's concurrency: two processes writing one file, a lost-update
+race that silently erased captures, an origin-resolution bug that would have
+retried into a nonexistent chat forever, and a polling loop making ~288 API
+calls a day. Todoist's own reliability comfortably exceeds that.
+
+- **If Todoist is unconfigured, reminders are unavailable.** The skill must
+  say so rather than appear to set one. Captures and notes still work.
+- **If the create call fails**, the capture is safe in the transcript but the
+  reminder does not exist — report that plainly.
+- **Recurrence** uses Todoist's own (`--due-string "every monday 9am"`); do
+  not hand-roll regeneration.
+- **The nightly backup exports open tasks** to `todoist-export.jsonl`, which
+  is their only off-box copy.
 
 ---
 
@@ -230,15 +234,15 @@ Every event below writes one line to the current month's `logs/` file — timest
 
 Questions are diverted here by the extraction pass — question items never produce a raw log entry. Which store gets searched depends on what is being asked:
 
-**A. Reminder queries** ("what's due this week", "did I take it?") — read the local `reminders.json`, filter by `status: pending`, present sorted soonest-first: the authoritative "still pending" list. For "did it get done" answers, cross-check completion state in Todoist. If the user asks about a task they created manually in Todoist, answer from Todoist.
+**A. Reminder queries** ("what's due this week", "did I take it?") — `todoist.py list`, soonest-first; `todoist.py completed --since … --until …` for history. Todoist holds every reminder, including ones the user created there by hand.
 
-**B. Structured records** ("when did I last buy X", "BP last month") — query the SQLite `records` table (schema §9) by `domain`/`entity`/date range; answer conversationally. Prescription-overlap checks: pull the relevant rows and diff the `data_json` medicine lists in reasoning, not SQL.
+**B. Series and measurements** ("when did I last buy X", "BP last month") — read the relevant vault series note and reason over it directly. These files are small; the agent is the query engine, so correlate and summarise rather than quoting lines.
 
 **C. Vault content (project / reference / idea / narrative record)** — search the vault by title, backlink, or domain tag; exclude `status: archived` / `superseded` from default answers (surface them if explicitly asked). Reference pages look up by name (entity/concept/procedure); Projects by open status.
 
 **D. Everything else, and fallback** — the raw log is the ground truth: `rawlog.py search --tag/--text/--type` (covering the current month and `raw/archive/`). Answers conversationally; the user never needs to know or guess a tag or type name.
 
-At this personal scale, keyword/tag search over a small file set plus a few indexed SQLite columns is sufficient — no vector DB or embedding search needed.
+At this personal scale, keyword search over a small file set is sufficient — no index, no vector DB, no embedding search needed.
 
 ---
 
@@ -271,7 +275,7 @@ Each person runs their own copy against their own Hermes instance — single-use
 
 - **`SKILL.md`** — the distilled operational policy: tag format, routing rules, splitting/supersession heuristics, topic file format, consolidation behavior. Terse and rule-based, ending with a pointer to this spec, the implementation source, and `logs/`.
 - **The capture gate** — hooks into the base adapter's inbound seam of the user's own already-running Hermes instance.
-- **`reminder-check.sh`** (or equivalent) — the cron-called script scanning `reminders.json` and firing due reminders.
+- **`todoist.py`** — the Todoist client through which all reminders are created and queried.
 - **`crontab.example`** — the exact line(s) to add.
 - **`setup.sh`** — creates the `/working-memory/` skeleton and initializes the git repo.
 - **`.env.example`** — working-memory path and tunable thresholds.
@@ -293,7 +297,7 @@ Goal: let Hermes notice when SKILL.md or the underlying design has a gap, withou
 **Approval boundary:**
 - **Low-risk, self-tuning:** adjusting an already-tunable numeric threshold based on observed friction — auto-applied, change and reasoning logged.
 - **Higher-risk, needs sign-off first:** changes to classification rules, tag policy, splitting/supersession heuristics, or command-handling logic. Present as a before/after diff and wait for confirmation.
-- **Not self-patchable at all:** anything in the deterministic code (capture gate, `reminder-check.sh`) — surfaced as a flagged issue for the user, not edited unsupervised.
+- **Not self-patchable at all:** anything in the deterministic code (capture gate, `rawlog.py`, `todoist.py`) — surfaced as a flagged issue for the user, not edited unsupervised.
 
 **Why this is safe:** SKILL.md is kept under git version control, so every accepted refinement is diffable and revertible.
 

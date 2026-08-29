@@ -5,7 +5,7 @@ Every component used to carry its own copy of the env-file parser, its own
 timestamp handling, and its own idea of where the vault lives. They drifted:
 only the consolidation gate stripped quotes from env values (so
 ``WM_ROOT="~/wm"`` resolved to a different directory in different scripts),
-the gate hardcoded UTC+05:30 while reminder-check used the system zone, and
+the gate hardcoded UTC+05:30 while another script used the system zone, and
 ``~/wiki`` was baked into the backup script. This module is the single
 definition of all of it.
 
@@ -14,9 +14,12 @@ package may import this one, and this one imports none of them.
 
 Contents:
   * env      -- load_env_file, wm_env, hermes_env, wm_root, vault_path
-  * time     -- tz, now, parse_iso, to_utc, iso  (always timezone-aware)
+  * time     -- tz, now, parse_iso, local_iso  (always timezone-aware)
   * logging  -- log (one JSON line per event, appended to logs/YYYY-MM.log)
-  * files    -- write_json_atomic, FileLock
+  * files    -- FileLock
+
+Nothing is kept here "in case it is useful": to_utc, iso, write_json_atomic
+and load_lanes were removed with their last callers in the 2026-08-29 cut.
 """
 
 import datetime as _dt
@@ -27,8 +30,8 @@ import pathlib
 
 __all__ = [
     "HERMES_HOME", "load_env_file", "wm_env", "hermes_env", "wm_root",
-    "vault_path", "tz", "now", "parse_iso", "to_utc", "iso", "log",
-    "write_json_atomic", "FileLock", "LockBusy",
+    "vault_path", "tz", "now", "parse_iso", "local_iso", "log",
+    "FileLock", "LockBusy",
 ]
 
 HERMES_HOME = pathlib.Path(
@@ -135,19 +138,6 @@ def parse_iso(value, env=None):
     return dt
 
 
-def to_utc(value, env=None):
-    """Normalise a timestamp to UTC. Returns None if unparseable.
-
-    Stored timestamps go through this so that string comparison in SQLite
-    matches chronological order — mixed offsets sort wrongly otherwise.
-    """
-    dt = parse_iso(value, env)
-    return None if dt is None else dt.astimezone(_dt.timezone.utc)
-
-
-def iso(dt=None, env=None) -> str:
-    """ISO-8601, second precision, always with an offset."""
-    return (now(env) if dt is None else dt).isoformat(timespec="seconds")
 
 
 def local_iso(value, env=None):
@@ -194,43 +184,6 @@ def log(root, component, event, outcome, **extra) -> None:
 
 # ---------------------------------------------------------------- files
 
-def write_json_atomic(path, obj) -> None:
-    """Write JSON via a temp file + rename, so readers never see a partial file."""
-    path = pathlib.Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(obj, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    tmp.replace(path)
-
-
-def load_lanes(root, env=None) -> dict:
-    """Reserved lanes: lane key ("platform:chat:thread") -> record.
-
-    Mirrors what the capture hook maintains in meta/lanes.json, plus the
-    legacy WM_TELEGRAM_CHAT_ID env seed, so other components can check an
-    address against the set of chats the user actually reserved. Read-only:
-    only the hook ever writes this file.
-    """
-    env = wm_env() if env is None else env
-    lanes = {}
-    try:
-        data = json.loads(
-            (pathlib.Path(root) / "meta" / "lanes.json").read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            lanes.update(data)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    legacy_thread = (env.get("WM_TELEGRAM_THREAD_ID") or "").strip()
-    for cid in (c.strip() for c in env.get("WM_TELEGRAM_CHAT_ID", "").split(",") if c.strip()):
-        lanes.setdefault(f"telegram:{cid}:{legacy_thread}", {
-            "platform": "telegram", "chat_id": cid,
-            "thread_id": legacy_thread, "reserved_at": "env-seed"})
-    return lanes
-
 
 class LockBusy(Exception):
     """Raised by FileLock(blocking=False) when another holder has the lock."""
@@ -239,15 +192,16 @@ class LockBusy(Exception):
 class FileLock:
     """flock-based mutual exclusion around a read-modify-write.
 
-    The reminder store is written by two independent processes — the agent
-    (capture) and the reminder-check cron tick. The cron used to hold a
-    lock the agent knew nothing about, which protects cron against cron
-    but not against the writer it actually races. Both sides now take this
-    lock, so a capture landing mid-tick can no longer be erased by the
-    tick's write-back.
+    Used by the transcript append, where two simultaneous captures would
+    otherwise interleave a read (for the duplicate check) with a write.
+
+    It exists because an earlier design had two processes writing one store
+    while only one of them took a lock: the unlocked writer's captures were
+    silently erased by the other's write-back. If you add a second writer to
+    any file, both sides take the lock or neither is protected.
 
     Usage:
-        with FileLock(root / "meta" / "reminders.lock"):
+        with FileLock(root / "meta" / "rawlog.lock"):
             ...read, modify, write...
     """
 

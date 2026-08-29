@@ -33,10 +33,7 @@ private remote. Never commit data into this repo.
 ```
 wmlib.py                  env parsing, timezone, logging, atomic writes, locking
 rawlog.py                 the raw capture log (CLI) — owns the on-disk entry format
-records.py                SQLite store for structured records (CLI)
-reminders.py              reminder store (CLI) — owns reminders.json
-todoist.py                Todoist API client + CLI; importable as a library
-reminder-check.py         cron: fires due reminders (every 5 min)
+todoist.py                Todoist client + CLI — the reminder layer
 wm-consolidation-gate.py  cron: nightly; prints work or stays SILENT
 wm-backup-push.py         cron: nightly backup push (watchdog)
 cron-session-prune.py     cron: monthly session cleanup
@@ -45,7 +42,7 @@ hooks/working-memory-debounce/handler.py
 SKILL.md                  the agent's policy (installed as a Hermes skill)
 setup.sh / export.sh      installer / machine-to-machine migration
 verify-on-vps.sh          full verification against the live install
-tests/                    12 suites; tests/run_all.py runs them all
+tests/                    8 suites; tests/run_all.py runs them all
 ```
 
 Design docs, in the order worth reading:
@@ -63,9 +60,8 @@ Design docs, in the order worth reading:
 | You need to… | Read |
 |---|---|
 | change how a capture is classified or routed | `SKILL.md`, `second-brain-schema.md` |
-| touch reminders | `reminders.py` first, then `reminder-check.py` |
-| touch structured records | `records.py` |
-| change the raw entry format, ids, or dedup | `rawlog.py` — and the spec §5 contract |
+| touch reminders | `todoist.py` — there is no local reminder store |
+| change the transcript format or dedup | `rawlog.py` — and the spec §5 contract |
 | change what triggers the nightly agent run | `wm-consolidation-gate.py` |
 | change capture/buffering/lanes | `hooks/working-memory-debounce/handler.py` |
 | add or change a Todoist call | `todoist.py`, then check the call budget (below) |
@@ -76,22 +72,18 @@ Design docs, in the order worth reading:
 
 These exist because breaking them caused real bugs. Each is enforced by a test.
 
-1. **Never hand-write `raw/`, `reminders.json`, or `records.db`.** Use
-   `rawlog.py` / `reminders.py` / `records.py`. Each closes a *silent* failure
-   mode: the reminder store has two concurrent writers (the agent and the cron
-   tick) and the CLI takes the lock a direct edit does not, so an unlocked
-   capture is erased by the tick's write-back; a malformed raw header makes an
-   entry invisible to consolidation forever; a colliding raw id breaks the
-   `raw_entry_id` links back from reminders and records. None of these report
-   anything when they go wrong.
-2. **The live `records.db` is never copied, moved, or replaced.** It is
-   WAL-mode. The committed artifact is `records-snapshot.db`, produced by
-   SQLite's backup API while the live file is only read. Replacing the file
-   under open connections corrupts it — measurably, not theoretically.
-3. **Timestamps: store UTC, display local.** `records.occurred_at` is stored
-   normalised to UTC so string comparison matches chronological order.
-   Everything shown to a user goes through `wmlib.local_iso()`. Never hardcode
-   an offset or a zone; `wmlib.tz()` resolves `WM_TZ` or the system zone.
+1. **Never hand-write `raw/`.** Use `rawlog.py`. A malformed header makes an
+   entry invisible to the consolidation gate forever, and nothing reports it.
+   The transcript is append-only: never edit or delete an entry, including for
+   "forget X" — say plainly that the words remain.
+2. **The transcript is the only thing upstream of the agent's judgment.** The
+   vault's git history records changes to what was *filed*; only `raw/`
+   records what the user actually *said*. That is what makes an LLM
+   misclassification recoverable rather than silent permanent loss. Think hard
+   before touching it.
+3. **Timestamps: store aware, display local.** Everything shown to a user goes
+   through `wmlib.local_iso()`. Never hardcode an offset or a zone;
+   `wmlib.tz()` resolves `WM_TZ` or the system zone.
 4. **Watchdogs are silent when healthy.** `wm-consolidation-gate.py` printing
    nothing is how the scheduler knows to skip the AI call entirely — that is
    the whole point of the gate. `wm-backup-push.py` prints only problems. An
@@ -111,16 +103,16 @@ asserted in `tests/test_todoist_budget.py`. Current steady state:
 
 | Event | Calls |
 |---|---|
-| capture a reminder (project id cached) | 1 (`POST /tasks`) |
-| capture, cold cache | 2 (+ `GET /projects`, cached afterwards) |
-| 5-min tick, nothing pending | **0** |
-| 5-min tick, reconcile window open | 1 (`GET /tasks`, all open ids at once) |
+| create a reminder (project id cached) | 1 (`POST /tasks`) |
+| create, cold cache | 2 (+ `GET /projects`, cached afterwards) |
+| "what's due" | 2 (`GET /projects`, `GET /tasks`) |
 | nightly backup export | 2 |
+| **anything else, including idling** | **0** |
 
-≈48 calls/day at rest, because completion reconciliation is rate-limited to
-`TODOIST_RECONCILE_MINUTES` (default 30) rather than running every tick.
-**If you add a call inside the tick, you are adding 288 requests/day.** Check
-the budget test before and after.
+There is no polling loop: since the 2026-08-29 cut nothing contacts Todoist
+unless the agent is acting. Cost is proportional to use, not to time —
+roughly 2 calls a day at rest. **Do not reintroduce a periodic poll**; that
+is how this got to 288 requests/day before.
 
 ## Cron and the wrapper model
 
@@ -131,12 +123,11 @@ effect immediately — no refresh step.
 
 **If you add a script that cron must run, add it to `WRAPPED_SCRIPTS` in
 `setup.sh`.** A script invoked from that directory without a wrapper is a
-stale copy waiting to happen; that exact situation put pre-fix
-`reminder-check.py` code in the scheduler's path once already.
+stale copy waiting to happen — that exact situation once put a superseded
+script in the scheduler's path.
 
-Current cron jobs (no new ones were added by the recent work):
-`reminder-check.py` (OS crontab, 5 min), `wm-consolidation-gate.py` (nightly,
-Hermes job), `wm-backup-push.py` (nightly, Hermes no_agent job),
+Current scheduled work — all inside Hermes, **no OS crontab entry**:
+`wm-consolidation-gate.py` (nightly), `wm-backup-push.py` (nightly no_agent),
 `cron-session-prune.py` (monthly).
 
 ## Testing

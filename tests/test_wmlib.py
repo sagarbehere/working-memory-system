@@ -59,14 +59,6 @@ def test_time():
     check(wmlib.parse_iso("not-a-date") is None, "garbage -> None")
     check(wmlib.parse_iso(None) is None, "None -> None")
 
-    # The bug this guards: two spellings of one instant must normalise equal,
-    # because stored timestamps are compared as strings.
-    a = wmlib.to_utc("2026-08-21T09:30:00+05:30")
-    b = wmlib.to_utc("2026-08-21T04:00:00+00:00")
-    check(a == b, "same instant, different offsets -> equal")
-    check(a.isoformat() == b.isoformat(), "same instant -> identical string")
-    check(a.tzinfo == _dt.timezone.utc, "to_utc returns UTC")
-
     os.environ["WM_TZ"] = "Asia/Kolkata"
     try:
         check(wmlib.now().utcoffset() == _dt.timedelta(hours=5, minutes=30),
@@ -94,13 +86,6 @@ def test_display_is_never_utc():
     finally:
         os.environ.pop("WM_TZ", None)
 
-
-def test_atomic_write():
-    with tempfile.TemporaryDirectory() as td:
-        target = pathlib.Path(td) / "sub" / "x.json"
-        wmlib.write_json_atomic(target, {"a": 1})
-        check(target.exists(), "atomic write creates parents")
-        check(not list(target.parent.glob("*.tmp")), "no temp file left behind")
 
 
 def test_lock_excludes():
@@ -135,7 +120,6 @@ def main():
     test_env_quoting()
     test_time()
     test_display_is_never_utc()
-    test_atomic_write()
     test_lock_excludes()
     print(f"ALL WMLIB TESTS PASSED ({checks} checks)")
 

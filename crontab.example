@@ -1,9 +1,14 @@
-# Working-memory reminder check — every 5 minutes.
-# Install: crontab -e, then paste the line below (replace the paths with
-# your own — the package dir and your ~/.hermes dir). Logs land in
-# ~/.hermes/logs/wm-reminders.log.
+# No crontab entry is required by the working-memory system.
 #
-# No Telegram? Skip this line. Instead register a Hermes no_agent cron job
-# (every 5 minutes, script=reminder-check.py, deliver to your home channel):
-# the script prints only due reminders, which the scheduler delivers verbatim.
-*/5 * * * * /path/to/working-memory-system/reminder-check.py >> $HOME/.hermes/logs/wm-reminders.log 2>&1
+# Reminders are created directly in Todoist, which notifies your devices; the
+# 5-minute reminder-check tick that used to live here was removed on
+# 2026-08-29 along with the local reminder store.
+#
+# IF YOU ARE UPGRADING and previously installed that line, REMOVE IT --
+# otherwise cron invokes a script that no longer exists, every five minutes:
+#
+#     crontab -e      # then delete the line mentioning reminder-check.py
+#
+# The remaining scheduled work is registered inside Hermes, not the OS
+# crontab: the nightly consolidation gate, the nightly backup push, and the
+# monthly cron-session prune. See README / setup.sh output.

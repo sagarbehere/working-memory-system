@@ -17,34 +17,20 @@ echo "Hermes:  $HERMES_HOME"
 
 # 1. Data skeleton (spec Section 3/4)
 mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/meta" "$WM_ROOT/logs"
-if [ ! -f "$WM_ROOT/reminders.json" ]; then
-  echo "[]" > "$WM_ROOT/reminders.json"
-fi
 if [ ! -f "$WM_ROOT/meta/lanes.json" ]; then
   echo "{}" > "$WM_ROOT/meta/lanes.json"
 fi
-# 1b. v3: structured-records store (schema §9) — creates records.db (safe to re-run)
-python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
-
 # 2. Backup git repo (spec Section 3) — repo-local identity, no global config.
 #    FRESH install: init + initial commit so the audit trail starts.
 #    ESTABLISHED repo: identity config only, NEVER commit — pending changes
 #    belong to whoever made them (capture pipeline, agent edits); a catch-all
 #    commit here raced an in-flight edit and mislabeled it "init:" (2026-08-29).
-#
-#    The live SQLite database is deliberately NOT tracked: it is a WAL-mode
-#    file whose committed form must be a consistent snapshot, which
-#    wm-backup-push.py writes separately as records-snapshot.db.
+
 WM_IGNORES='meta/pending-buffer.json
 meta/*.lock
-meta/tag-index.json
 meta/todoist-state.json
 logs/
-*.tmp
-records.db
-records.db-wal
-records.db-shm
-records.db.pre-migrate'
+*.tmp'
 
 if [ ! -d "$WM_ROOT/.git" ]; then
   git -C "$WM_ROOT" init -q
@@ -76,19 +62,20 @@ EOF
   else
     echo "Git repo already initialized (working tree left untouched)."
   fi
-  # A previously-tracked records.db keeps being committed despite .gitignore,
-  # and a WAL-mode database committed live is torn. Flag it; don't act — an
-  # established repo's history is the user's to change.
-  if git -C "$WM_ROOT" ls-files --error-unmatch records.db >/dev/null 2>&1; then
-    echo
-    echo "  NOTE: records.db is tracked by git. It should not be — the live"
-    echo "  WAL-mode database commits in a torn state, and the consistent copy"
-    echo "  is records-snapshot.db (written nightly). To stop tracking it"
-    echo "  WITHOUT deleting the file:"
-    echo "      git -C $WM_ROOT rm --cached records.db records.db-wal records.db-shm"
-    echo "      git -C $WM_ROOT commit -m 'stop tracking the live SQLite db'"
-    echo
-  fi
+  # Upgrade cleanup: the 2026-08-29 cut removed the SQLite store and the
+  # local reminder store. Their files linger in an existing WM_ROOT and, if
+  # tracked, keep being committed. Flag them; never delete the user's data.
+  for stale in records.db reminders.json records-snapshot.db; do
+    if [ -e "$WM_ROOT/$stale" ]; then
+      echo "  NOTE: $WM_ROOT/$stale is left over from before the 2026-08-29"
+      echo "        cut and is no longer used. Reminders now live in Todoist."
+      if git -C "$WM_ROOT" ls-files --error-unmatch "$stale" >/dev/null 2>&1; then
+        echo "        It is still tracked by git. To retire it:"
+        echo "            git -C $WM_ROOT rm --cached $stale"
+      fi
+      echo "        Delete it when you are satisfied nothing needs it."
+    fi
+  done
 fi
 
 # 3. Install the skill (SYMLINK, like the hook — the package is the single
@@ -119,18 +106,10 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - wm-backup-push.py         -> nightly backup push to the private
 #         remote (watchdog: silent when healthy, alerts on failure)
 #       - rawlog.py                 -> raw capture log CLI (owns the entry format)
-#       - records.py                -> v3 structured-records store CLI
-#       - reminders.py              -> v3 reminder store CLI (locked writer)
-#       - todoist.py                -> v3 Todoist mirror helper
-#       - reminder-check.py         -> the firing tick. Wrapped because
-#         crontab.example tells you to register a Hermes no_agent job with
-#         script=reminder-check.py, and that scheduler resolves scripts from
-#         ~/.hermes/scripts. Earlier versions never installed it there, so a
-#         hand-placed COPY could linger and run pre-fix code — bypassing the
-#         store lock and racing the agent. A wrapper cannot go stale.
+#       - todoist.py                -> Todoist client (the reminder layer)
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py rawlog.py records.py reminders.py todoist.py reminder-check.py"
+WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py rawlog.py todoist.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then
@@ -152,6 +131,28 @@ WRAPPER_EOF
 done
 echo "Wrapper scripts installed (exec package copies): $WRAPPED_SCRIPTS"
 
+# 4c. Retire wrappers for scripts this package no longer ships. A wrapper left
+#     behind execs a package file that no longer exists, and Hermes' cron
+#     resolves scripts from this directory — that is how a superseded script
+#     once stayed in the scheduler's path. Named explicitly, never a directory
+#     sweep: other projects keep their own scripts here.
+RETIRED_SCRIPTS="reminders.py records.py reminder-check.py"
+for s in $RETIRED_SCRIPTS; do
+  target="$HERMES_HOME/scripts/$s"
+  if [ -f "$target" ]; then
+    # Only remove something this installer generated; never touch a file
+    # someone else put here that happens to share the name.
+    if head -3 "$target" 2>/dev/null | grep -q "Wrapper — execs the package copy"; then
+      rm -f "$target"
+      echo "Retired stale wrapper: $target (script removed in the 2026-08-29 cut)"
+    else
+      echo "  NOTE: $target exists but was not generated by setup.sh — leaving it."
+      echo "        The working-memory package no longer ships $s; if this is"
+      echo "        a leftover copy, delete it (Hermes cron runs scripts here)."
+    fi
+  fi
+done
+
 # 5. Runtime env (never overwrite user edits)
 if [ ! -f "$HERMES_HOME/working-memory.env" ]; then
   cp "$PKG_DIR/.env.example" "$HERMES_HOME/working-memory.env"
@@ -159,9 +160,6 @@ if [ ! -f "$HERMES_HOME/working-memory.env" ]; then
 else
   echo "Config exists (kept): $HERMES_HOME/working-memory.env"
 fi
-
-# 6. Make scripts executable
-chmod +x "$PKG_DIR/reminder-check.py"
 
 # 7. Version-control the package (spec Section 17: SKILL.md tracked in git,
 #    so every accepted refinement is diffable and revertible)
@@ -188,8 +186,9 @@ echo "2) Optional frictionless lane: set WM_TELEGRAM_CHAT_ID (+ THREAD_ID)"
 echo "   in $HERMES_HOME/working-memory.env as a legacy seed, OR reserve a"
 echo "   chat in-band with 'reserve for memory' (any platform; release"
 echo "   with 'release for memory'). Markers are implied in reserved chats."
-echo "3) Add the cron line (crontab -e):"
-sed 's/^/   /' "$PKG_DIR/crontab.example"
+echo "3) No OS crontab entry is needed. If you are UPGRADING and have a"
+echo "   reminder-check.py line in your crontab, remove it — that script is"
+echo "   gone (crontab -e)."
 echo "4) Restart the gateway so the hook loads (run from SSH, not from"
 echo "   inside an agent session — it deadlocks there):"
 echo "   hermes gateway restart"

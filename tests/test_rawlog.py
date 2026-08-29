@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for the raw capture log (rawlog.py).
+"""Tests for the raw capture transcript (rawlog.py).
 
-The two failure modes this CLI exists to prevent are both silent, so they are
-asserted directly: a header the consolidation gate cannot parse (the entry
-becomes invisible to consolidation forever) and a colliding id (breaks the
-raw_entry_id links reminders and records point back with).
+The transcript is deliberately tiny — a timestamp and verbatim text — so the
+surface worth testing is narrow: the consolidation gate must be able to count
+every entry, captured text must survive verbatim whatever it contains, and
+entries written by earlier versions (which carried ids and typed fields) must
+still read back.
 
 Run: python3 tests/test_rawlog.py   (from the package dir)
 """
@@ -41,169 +42,99 @@ def _root():
     return td
 
 
-def test_format_matches_the_spec():
-    """The on-disk shape is spec §5, exactly."""
+def test_format():
     root = _root()
     at = wmlib.parse_iso("2026-08-24T16:03:00+05:30")
-    rawlog.add(root, "Took vitamin D pill. Next one due in a week.",
-               when=at, type="reminder", tags="health, vitamin-d",
-               domain="health, vitamin-d", supersedes="20260817-1610-01")
+    rawlog.add(root, "Took vitamin D pill. Next one due in a week.", when=at)
     text = (root / "raw" / "2026-08.md").read_text()
-    expected = (
-        "## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]\n"
-        "tags: health, vitamin-d\n"
-        "type: reminder\n"
-        "domain: health, vitamin-d\n"
-        "supersedes: 20260817-1610-01\n"
-        "\n"
-        "Took vitamin D pill. Next one due in a week.\n"
-        "\n"
-        "---\n"
-    )
-    check(text == expected, f"byte-exact spec §5 layout\n--got--\n{text}\n--want--\n{expected}")
+    check(text == "## 2026-08-24T16:03:00+05:30\n\n"
+                  "Took vitamin D pill. Next one due in a week.\n\n",
+          f"timestamp and text, nothing else (got {text!r})")
+    check("type:" not in text and "[id:" not in text,
+          "no classification and no id — the destination note carries those")
 
 
-def test_gate_can_parse_every_entry():
-    """THE silent failure: a header the gate cannot read is invisible forever."""
+def test_gate_counts_every_entry():
+    """A header the gate cannot read means an entry never gets consolidated."""
     root = _root()
     for i in range(5):
-        rawlog.add(root, f"entry {i}", type="record", domain="misc")
-    # Awkward content that a hand-written entry might mangle.
-    rawlog.add(root, "text with --- a separator-looking line\nand ## a hash line",
-               type="idea", domain="misc")
-    rawlog.add(root, "unicode ✅ and : colons: everywhere", type="idea", domain="misc")
-
+        rawlog.add(root, f"entry {i}", force=True)
+    rawlog.add(root, "unicode ✅ and : colons: everywhere", force=True)
     count, newest = gate.raw_entries_since(str(root), None)
-    check(count == 7, f"the gate counts every entry written (got {count}/7)")
-    check(newest is not None and newest.tzinfo is not None,
-          "and reads an aware timestamp from each header")
+    check(count == 6, f"gate counts every entry (got {count}/6)")
+    check(newest is not None and newest.tzinfo is not None, "aware timestamp read")
 
 
-def test_body_containing_a_separator_survives():
-    """Captured text may legitimately contain a '---' line or a '##' heading.
-
-    Treating the first '---' in the body as the entry terminator truncated the
-    entry on read: the tail stayed on disk but disappeared from every search,
-    with no error anywhere. Entries are delimited by the header instead.
-    """
+def test_text_survives_verbatim():
+    """Captured text may contain anything, including our own delimiters."""
     root = _root()
     danger = "Notes from the meeting:\n---\n## Action items\n- ship it"
-    rawlog.add(root, danger, type="record", domain="misc")
-    rawlog.add(root, "a following entry", type="idea", domain="misc")
-
+    rawlog.add(root, danger)
+    rawlog.add(root, "a following entry")
     entries = rawlog.read_entries(root)
-    check(len(entries) == 2, f"a '---' in the body does not split the entry (got {len(entries)})")
-    check(entries[0]["text"] == danger,
-          f"the body round-trips losslessly (got {entries[0]['text']!r})")
-    check(entries[1]["text"] == "a following entry", "the next entry is unaffected")
-    check(len(rawlog.search(root, text="ship it")) == 1,
-          "and the tail is still searchable")
-
-    # Body whose own last line is '---': we write our terminator after it, and
-    # strip exactly one on read, so even this round-trips unchanged.
-    ends_with_rule = "before\n---"
-    rawlog.add(root, ends_with_rule, type="idea", domain="misc")
-    check(rawlog.read_entries(root)[2]["text"] == ends_with_rule,
-          f"a body ending in '---' round-trips too "
-          f"(got {rawlog.read_entries(root)[2]['text']!r})")
+    check(len(entries) == 2, f"a '---' body line does not split the entry (got {len(entries)})")
+    check(entries[0]["text"] == danger, f"round-trips losslessly (got {entries[0]['text']!r})")
+    check(len(rawlog.search(root, text="ship it")) == 1, "and the tail is searchable")
 
 
-def test_ids_are_unique_within_a_minute():
-    """THE other silent failure: a colliding id breaks raw_entry_id links."""
-    root = _root()
-    at = wmlib.parse_iso("2026-08-24T16:03:00+05:30")
-    ids = [rawlog.add(root, f"thought number {i}", when=at, force=True,
-                      type="record", domain="misc")[0]["id"] for i in range(12)]
-    check(len(set(ids)) == 12, f"12 captures in one minute -> 12 ids (got {ids})")
-    check(ids[0] == "20260824-1603-01" and ids[11] == "20260824-1603-12",
-          f"suffixes increment per spec §5 (got {ids[0]}..{ids[11]})")
-
-    # Re-reads existing entries, so a later process continues the sequence.
-    again = rawlog.add(root, "from a separate call", when=at, type="record")[0]
-    check(again["id"] == "20260824-1603-13", f"sequence survives a new process (got {again['id']})")
-
-
-def test_dedup_is_exact_and_windowed():
+def test_dedup():
     root = _root()
     t0 = wmlib.parse_iso("2026-08-24T10:00:00+05:30")
-    first, dup = rawlog.add(root, "buy stamps", when=t0, type="record", domain="misc")
+    _e, dup = rawlog.add(root, "buy stamps", when=t0)
     check(not dup, "first write is not a duplicate")
-
-    same, dup = rawlog.add(root, "buy stamps", when=t0, type="record")
-    check(dup and same["id"] == first["id"], "identical re-send returns the original id")
-
-    _e, dup = rawlog.add(root, "  BUY   STAMPS  ", when=t0, type="record")
-    check(dup, "whitespace and case differences still count as identical")
-
-    _e, dup = rawlog.add(root, "buy stamps today", when=t0, type="record")
+    _e, dup = rawlog.add(root, "  BUY   STAMPS  ", when=t0)
+    check(dup, "identical modulo case and whitespace")
+    _e, dup = rawlog.add(root, "buy stamps today", when=t0)
     check(not dup, "a NEAR match is a real capture — exact matching only")
-
-    later = wmlib.parse_iso("2026-08-25T11:00:00+05:30")   # 25h on
-    _e, dup = rawlog.add(root, "buy stamps", when=later, type="record")
-    check(not dup, "outside the 24h window it is a new capture")
-
-    _e, dup = rawlog.add(root, "buy stamps", when=t0, force=True, type="record")
-    check(not dup, "--force overrides dedup")
-
-    entries = rawlog.read_entries(root)
-    check(len(entries) == 4, f"exactly the non-duplicate writes landed (got {len(entries)})")
+    _e, dup = rawlog.add(root, "buy stamps",
+                         when=wmlib.parse_iso("2026-08-25T11:00:00+05:30"))
+    check(not dup, "outside 24h it is a new capture")
+    _e, dup = rawlog.add(root, "buy stamps", when=t0, force=True)
+    check(not dup, "--force overrides")
+    check(len(rawlog.read_entries(root)) == 4, "only non-duplicates landed")
 
 
-def test_search_and_show():
+def test_search():
     root = _root()
-    rawlog.add(root, "printer is out of ink", type="record",
-               tags="printer", domain="home",
-               when=wmlib.parse_iso("2026-08-20T09:00:00+05:30"))
-    rawlog.add(root, "vitamin D taken", type="record",
-               tags="health", domain="health",
-               when=wmlib.parse_iso("2026-08-22T09:00:00+05:30"))
-    rawlog.add(root, "idea about the printer stand", type="idea",
-               tags="printer", domain="home",
-               when=wmlib.parse_iso("2026-08-24T09:00:00+05:30"))
-
-    got = [e["text"] for e in rawlog.search(root, tag="printer")]
-    check(len(got) == 2, f"tag search matches the tags field (got {got})")
+    for text, ts in (("printer is out of ink", "2026-08-20T09:00:00+05:30"),
+                     ("vitamin D taken", "2026-08-22T09:00:00+05:30"),
+                     ("idea about the printer stand", "2026-08-24T09:00:00+05:30")):
+        rawlog.add(root, text, when=wmlib.parse_iso(ts))
+    got = [e["text"] for e in rawlog.search(root, text="PRINTER")]
+    check(len(got) == 2, f"case-insensitive text search (got {got})")
     check(got[0].startswith("idea about"), "newest first")
-
-    check(len(rawlog.search(root, tag="health")) == 1, "tag search also covers domain")
-    check(len(rawlog.search(root, etype="idea")) == 1, "type filter")
-    check(len(rawlog.search(root, text="PRINTER")) == 2, "text search is case-insensitive")
     check(len(rawlog.search(root, since="2026-08-23T00:00:00+05:30")) == 1, "--since")
     check(len(rawlog.search(root, until="2026-08-21T00:00:00+05:30")) == 1, "--until")
-    check(rawlog.search(root, tag="nope") == [], "no match -> empty")
+    check(rawlog.search(root, text="nope") == [], "no match -> empty")
 
 
-def test_reads_hand_written_history():
-    """The log predates this CLI, so the parser must tolerate older entries."""
+def test_reads_older_entries():
+    """Entries written before the cut carried ids and typed fields."""
     root = _root()
     (root / "raw" / "2026-07.md").write_text(
         "## 2026-07-04T08:00:00+05:30 [id: 20260704-0800-01]\n"
         "tags: legacy\n"
         "type: record\n"
+        "domain: misc\n"
         "\n"
-        "an entry written before the CLI existed\n"
+        "an entry written before the transcript cut\n"
         "\n"
         "---\n"
         "\n"
-        "## 2026-07-05T08:00:00+05:30\n"          # no id at all
-        "type: idea\n"
+        "## 2026-07-05T08:00:00+05:30\n"
         "\n"
-        "no id on this one\n"
-        "---\n"
-        "\ntrailing junk that is not an entry\n")
+        "a plain one\n"
+        "\n")
     entries = rawlog.read_entries(root)
-    check(len(entries) == 2, f"both legacy entries parsed (got {len(entries)})")
-    check(entries[0]["id"] == "20260704-0800-01", "id read")
-    check(entries[1]["id"] == "", "a missing id does not break parsing")
-    check("no id on this one" in entries[1]["text"], "body still recovered")
-
-    # And a new write must not collide with, or corrupt, that history.
-    new, _ = rawlog.add(root, "modern entry", type="record")
-    check(new["id"], "new entry still gets an id alongside legacy data")
-    check(len(rawlog.read_entries(root)) == 3, "history intact after appending")
+    check(len(entries) == 2, f"both old entries parsed (got {len(entries)})")
+    check(entries[0]["text"] == "an entry written before the transcript cut",
+          f"field lines and trailing --- stripped (got {entries[0]['text']!r})")
+    check(entries[1]["text"] == "a plain one", "new-style entry reads too")
+    check(len(rawlog.search(root, text="before the transcript")) == 1,
+          "old entries stay searchable")
 
 
-def test_cli_round_trip():
+def test_cli():
     root = _root()
     env = dict(os.environ, HERMES_HOME="/nonexistent-hermes-home")
     env.pop("WM_ROOT", None)
@@ -213,60 +144,44 @@ def test_cli_round_trip():
                                "--root", str(root), *args],
                               capture_output=True, text=True, env=env)
 
-    r = run("add", "--text", "cli capture", "--type", "record", "--domain", "misc")
-    check(r.returncode == 0, f"cli add ok ({r.stderr})")
-    out = json.loads(r.stdout)
-    check(out["duplicate"] is False and out["id"], "prints the id for the routing step")
-
-    r = run("add", "--text", "cli capture", "--type", "record")
+    r = run("add", "--text", "cli capture")
+    check(r.returncode == 0 and json.loads(r.stdout)["duplicate"] is False,
+          f"cli add ok ({r.stderr})")
+    r = run("add", "--text", "cli capture")
     check(json.loads(r.stdout)["duplicate"] is True, "cli reports a duplicate")
     check("not re-filed" in r.stderr, "and explains it on stderr")
-
-    r = run("show", "--id", out["id"])
-    check(json.loads(r.stdout)["text"] == "cli capture", "show by id")
-    r = run("show", "--id", "nope")
-    check(r.returncode == 1, "unknown id exits 1")
-
-    r = run("recent", "--limit", "5")
-    check(len(r.stdout.strip().splitlines()) == 1, "recent lists entries")
-
-    r = run("add", "--text", "x", "--type", "banana")
-    check(r.returncode == 2 and "Traceback" not in r.stderr,
-          f"bad --type is a clean error (got {r.stderr!r})")
+    r = run("search", "--text", "cli")
+    check(len(r.stdout.strip().splitlines()) == 1, "cli search")
     r = run("add", "--text", "   ")
-    check(r.returncode == 2, "empty text rejected")
+    check(r.returncode == 2 and "Traceback" not in r.stderr, "empty text is a clean error")
 
 
-def test_concurrent_adds_do_not_collide():
-    """Two captures at once must not race for the same id."""
+def test_concurrent_appends():
     root = _root()
     env = dict(os.environ, HERMES_HOME="/nonexistent-hermes-home")
     env.pop("WM_ROOT", None)
     procs = [subprocess.Popen(
         [sys.executable, str(PKG / "rawlog.py"), "--root", str(root), "add",
-         "--text", f"concurrent {i}", "--type", "record"],
+         "--text", f"concurrent {i}"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         for i in range(8)]
-    ids = []
     for p in procs:
-        out, _err = p.communicate(timeout=60)
-        ids.append(json.loads(out)["id"])
-    check(len(set(ids)) == 8, f"8 concurrent writers -> 8 distinct ids (got {sorted(ids)})")
-    check(len(rawlog.read_entries(root)) == 8, "and 8 entries on disk")
+        p.communicate(timeout=60)
+    check(len(rawlog.read_entries(root)) == 8,
+          f"8 concurrent writers -> 8 entries (got {len(rawlog.read_entries(root))})")
     count, _ = gate.raw_entries_since(str(root), None)
-    check(count == 8, "all 8 remain parseable by the gate")
+    check(count == 8, "all 8 parseable by the gate")
 
 
 def main():
-    test_format_matches_the_spec()
-    test_gate_can_parse_every_entry()
-    test_body_containing_a_separator_survives()
-    test_ids_are_unique_within_a_minute()
-    test_dedup_is_exact_and_windowed()
-    test_search_and_show()
-    test_reads_hand_written_history()
-    test_cli_round_trip()
-    test_concurrent_adds_do_not_collide()
+    test_format()
+    test_gate_counts_every_entry()
+    test_text_survives_verbatim()
+    test_dedup()
+    test_search()
+    test_reads_older_entries()
+    test_cli()
+    test_concurrent_appends()
     print(f"ALL RAWLOG TESTS PASSED ({checks} checks)")
 
 

@@ -76,39 +76,19 @@ def test_health_only_counts_since():
                 "event": "fire", "outcome": "failed"},
                {"ts": "2026-08-21T01:00:00+05:30", "component": "reminder-cron",
                 "event": "fire", "outcome": "failed"},
-               {"ts": "2026-08-21T02:00:00+05:30", "component": "reminders",
-                "event": "mirror", "outcome": "failed"})
+               {"ts": "2026-08-21T02:00:00+05:30", "component": "todoist",
+                "event": "create", "outcome": "failed"})
     entries = gate.read_log_entries(str(root))
     since = gate.last_consolidation_ts(entries)
     issues = gate.health_issues(str(root), since, entries)
     joined = " | ".join(issues)
     check("reminder-cron fire: 1 failure" in joined,
           f"only failures after the last consolidation count (got {joined})")
-    check("reminders mirror: 1 failure" in joined, "mirror failures surface")
+    check("todoist create: 1 failure" in joined, "todoist failures surface")
     check(len(issues) == 2, f"nothing else reported (got {issues})")
 
     check(gate.health_issues(str(_root()), None, []) == [],
           "healthy system reports nothing")
-
-
-def test_reminders_anomalies():
-    root = _root()
-    (root / "reminders.json").write_text(json.dumps([
-        {"id": "1", "status": "pending", "mirrored": True},          # no todoist_id
-        {"id": "2", "status": "banana"},                             # bad status
-        {"id": "3", "status": "pending", "mirrored": True, "todoist_id": "9"},
-        {"id": "4", "status": "cancelled"},
-    ]))
-    found = gate.health_issues(str(root), None, [])
-    issues = " | ".join(found)
-    check("missing todoist_id" in issues, "mirrored-without-id flagged")
-    status_line = [i for i in found if "unknown status" in i]
-    check(len(status_line) == 1, f"bad status flagged (got {found})")
-    # Assert on the reported IDS: the message lists ids, not status names, so
-    # checking for the word 'cancelled' would pass vacuously.
-    check("2" in status_line[0], "the banana-status reminder is the one flagged")
-    check("4" not in status_line[0],
-          f"'cancelled' is a legitimate status, not an anomaly (got {status_line[0]!r})")
 
 
 def test_quiet_night_is_silent():
@@ -147,7 +127,6 @@ def test_no_hardcoded_timezone():
 def main():
     test_log_scan()
     test_health_only_counts_since()
-    test_reminders_anomalies()
     test_quiet_night_is_silent()
     test_no_hardcoded_timezone()
     print(f"ALL GATE HEALTH TESTS PASSED ({checks} checks)")

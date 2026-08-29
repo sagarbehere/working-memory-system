@@ -121,42 +121,46 @@ Structural cues, not content cues:
 - Musing, quote, no time element, no action → **Idea/Quote**
 - Low confidence → default to **Record**
 
-## 9. Structured Record Storage (SQLite)
+## 9. Recurring Records — series notes
 
-Structured Records (health readings, purchases, prescriptions, etc.) live in one generic SQLite table rather than one table per domain — same anti-proliferation principle as types and tags:
+Repeated observations (health readings, purchases, prescriptions) go into a
+**single topical note per series** in the vault — `records/blood-pressure.md`,
+`records/headaches.md` — as one consistently formatted line per entry, newest
+appended at the end. Never a note per reading.
 
+```markdown
+# Blood pressure
+
+| Date       | Systolic | Diastolic | Notes            |
+|------------|----------|-----------|------------------|
+| 2026-08-20 | 128      | 82        | morning, resting |
+| 2026-08-23 | 131      | 84        | after walk       |
 ```
-records(id, type, domain, occurred_at, entity, data_json, notes)
-```
 
-`type`/`domain`/`entity`/`occurred_at` are indexed columns for filtering and sorting; `data_json` holds whatever fields are specific to that record kind, so a new domain never requires a schema change. Example rows:
+Keep the line shape stable so the whole history reads as a table. One-off
+dated records that are not part of a series stay as
+`records/YYYY-MM-DD-<slug>.md` notes.
 
-| id | type | domain | occurred_at | entity | data_json |
-|---|---|---|---|---|---|
-| 1 | health_reading | blood_pressure | 2026-08-20 | blood_pressure | `{"systolic":128,"diastolic":82}` |
-| 2 | prescription | medicine | 2026-08-05 | Dr. Sharma | `{"medicines":["Amlodipine 5mg","Metformin 500mg"]}` |
-| 3 | purchase | medicine | 2026-08-10 | ABC Pharmacy | `{"items":["Amlodipine 5mg","Metformin 500mg"]}` |
+**Why not a database (2026-08-29).** This was a generic SQLite table, on the
+reasoning that trend and overlap questions need queries. In practice it held
+zero rows while the same data lived happily in markdown, and the reasoning was
+wrong in a more interesting way: **a database earns its place when data
+outgrows a context window, and a single person's health log never will.** Ten
+years of twice-weekly readings is a few thousand short lines. The agent can
+read the whole file and answer correlational questions — *"do the headaches
+follow bad sleep?"*, *"did these two prescriptions overlap?"* — that SQL
+cannot express at all. The LLM is the query engine; the file is the store.
 
-Example queries:
-```sql
--- BP trend
-SELECT occurred_at, data_json FROM records
-WHERE domain = 'blood_pressure' ORDER BY occurred_at;
-
--- last purchase from a given pharmacy
-SELECT occurred_at, data_json FROM records
-WHERE type='purchase' AND entity LIKE '%Pharmacy%'
-ORDER BY occurred_at DESC LIMIT 1;
-```
-Prescription-overlap checks: pull the last two `prescription` rows, hand both `data_json` medicine lists to Hermes to diff in reasoning rather than SQL. Narrative Records (journal entries) stay as dated markdown notes in Obsidian, not in this table — only structured/numeric Records go here.
+The trade accepted: no indexed lookup, and no schema validation on what gets
+appended. Both are irrelevant at a file size measured in kilobytes.
 
 ## 10. Storage & Tooling Map
 
 | Type | Store | Why |
 |---|---|---|
-| Reminder | Todoist (visible layer) + local `reminders.json` (firing fallback) | Todoist: cross-device visibility + notifications. Local store: durable record + fires when the mirror is absent/failed (§9 of the spec) |
-| Record (structured) | SQLite (see §9) | Queryable by date/entity for trends and lookups |
-| Record (narrative) | Obsidian, `records/` dated notes | Full-text search, daily-note browsing |
+| Reminder | Todoist (the reminder layer) | Todoist owns the due date, recurrence, completion state and the cross-device notification. Nothing fires from the VPS; there is no local reminder store (2026-08-29 cut). |
+| Record (recurring series) | Obsidian, one note per series (see §9) | The whole history fits in context; the agent reads and correlates it |
+| Record (one-off) | Obsidian, `records/` dated notes | Full-text search, daily-note browsing |
 | Project | Obsidian, `projects/`, `status:` field | Search + a "status:active" dashboard query |
 | Reference | Obsidian, `references/{entities,concepts,procedures}/` by subtype, `status:` field | Search by name/title, backlinks |
 | Idea/Quote | Obsidian, `ideas/` | Backlinks, graph view, serendipitous resurfacing |

@@ -1,5 +1,21 @@
 # Working Memory System
 
+> [!WARNING]
+> **This README is out of date and is pending a full rewrite.** On 2026-08-29
+> the system was deliberately simplified: the local reminder store, its
+> five-minute cron tick, and the SQLite records store were all removed, and
+> the raw log became a plain verbatim transcript. Reminders now live entirely
+> in Todoist. Config keys, file layout, and several components described below
+> no longer exist.
+>
+> For what the system actually is today, read
+> [`CLAUDE.md`](CLAUDE.md) (orientation),
+> [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md)
+> (plumbing), and
+> [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md)
+> (why it is shaped this way).
+
+
 A capture-anywhere second brain on top of [Hermes Agent](https://hermes-agent.nousresearch.com): dump a thought in plain language from any chat, and the agent files it, organizes it, retrieves it later, and reminds you on schedule. No folders, no categories, no notes app to maintain — organizing is the system's job.
 
 **How it works**

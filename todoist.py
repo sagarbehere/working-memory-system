@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Todoist mirror helper for the working-memory v3 reminder layer (schema §10).
+"""Todoist client — the working-memory reminder layer (schema §10).
 
 Deterministic API client for the Todoist API v1 (api.todoist.com/api/v1/).
 Uses curl (subprocess) rather than urllib — Cloudflare's edge resets urllib's
@@ -9,11 +9,13 @@ Project + enable flags: TODOIST_PROJECT / TODOIST_MIRROR_ENABLED in
 
 Commands: ensure-project | create | list | close | delete | get
 
-Also importable as a library (reminders.py and reminder-check.py both use it,
-rather than each carrying its own copy of the client): the request helpers
-RAISE ``TodoistError`` / ``TodoistNotConfigured`` instead of calling
-sys.exit, and only main() turns those into exit codes. An earlier version
-exited from inside _req, which is why callers had to duplicate the client.
+Also importable as a library: the request helpers RAISE ``TodoistError`` /
+``TodoistNotConfigured`` rather than calling sys.exit, and only main() turns
+those into exit codes. An earlier version exited from inside _req, which
+forced every caller to carry its own copy of the client.
+
+Since the 2026-08-29 cut this is THE reminder layer, not a mirror of a local
+store: Todoist owns due dates, recurrence, completion, and notification.
 """
 import argparse
 import datetime as _dt
@@ -107,6 +109,46 @@ def ensure_project(name, tok=None):
     return p["id"]
 
 
+def _cache_path():
+    return wmlib.wm_root() / "meta" / "todoist-state.json"
+
+
+def cached_project_id(name=None, tok=None):
+    """Project id, cached on disk across runs.
+
+    Resolving it costs a full GET /projects and it never changes, so paying
+    that on every reminder would double the API cost of creating one. The
+    cache is disposable — a stale id surfaces as a failed create, which clears
+    it — and is gitignored, since a tracked cache would give the nightly
+    backup something to commit every night.
+    """
+    name = name or default_project()
+    path = _cache_path()
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(state, dict) and state.get("project_name") == name \
+                and state.get("project_id"):
+            return state["project_id"]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        state = {}
+    pid = ensure_project(name, tok)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"project_name": name, "project_id": pid}),
+                        encoding="utf-8")
+    except OSError:
+        pass  # a cache that cannot be written is not an error
+    return pid
+
+
+def forget_cached_project():
+    """Drop the cached id after a failure, so the next call re-resolves."""
+    try:
+        _cache_path().unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
 def create_task(content, due=None, due_string=None, project=None, parent=None,
                 tok=None, project_id_=None):
     """Create one task; returns the API's task dict.
@@ -115,7 +157,7 @@ def create_task(content, due=None, due_string=None, project=None, parent=None,
     paying a full project list per task.
     """
     tok = tok or token()
-    pid = project_id_ or ensure_project(project or default_project(), tok)
+    pid = project_id_ or cached_project_id(project or default_project(), tok)
     body = {"content": content, "project_id": pid}
     if parent:
         body["parent_id"] = parent
@@ -123,21 +165,15 @@ def create_task(content, due=None, due_string=None, project=None, parent=None,
         body["due_datetime"] = due
     elif due_string:
         body["due_string"] = due_string
-    task = _req("POST", "tasks", body, tok=tok)
+    try:
+        task = _req("POST", "tasks", body, tok=tok)
+    except TodoistError:
+        forget_cached_project()  # a stale project id is one cause of this
+        raise
     if not task or not task.get("id"):
         raise TodoistError("task creation returned no id")
     return task
 
-
-def open_task_ids(tok=None):
-    """Set of ids of all currently-open tasks — ONE request.
-
-    Completion reconciliation used to GET each mirrored task separately on
-    every tick, so cost grew with the number of outstanding reminders and
-    never fell. An id missing from this set is closed or deleted.
-    """
-    tasks = (_req("GET", "tasks", tok=tok) or {}).get("results", [])
-    return {str(t["id"]) for t in tasks if t.get("id")}
 
 
 def main():

@@ -18,31 +18,67 @@ the two corrections below show.
 ## Left behind from v2.0.0 — deliberately absent
 
 - **`topics/<tag>.md` flat files.** Replaced by typed notes in the Obsidian
-  vault plus structured rows in SQLite. If you find code referencing a
-  `topics/` directory, it is v2 residue, not a feature. *(The consolidation
-  gate still had such a check in 2026-08-29; it was dead code and was
-  removed.)*
+  vault. If you find code referencing a `topics/` directory, it is v2 residue,
+  not a feature.
 - **"Collapse into a rolling summary" as the default consolidation behaviour.**
-  In v3 this applies only to Reference-flavoured content. **Structured Records
-  in SQLite are never collapsed** — the whole point of the records table is
-  itemised history you can query, and summarising it destroys exactly what it
-  exists for.
+  It applies only to reference-flavoured content. **Series notes — repeated
+  measurements like blood pressure or headaches — are never collapsed**: the
+  itemised history is the whole point, and summarising destroys it.
 - **Backfill and migration (decided 2026-08-27).** v3 starts fresh. Existing
   wiki notes stay as they are with no tagging pass; v2 captures stay in the
   frozen v2 line. New writes are schema-compliant going forward. Rejected
   because a bulk retag is a large, risky, low-value operation on content the
   user can upgrade one note at a time if they ever care to.
 
-### Correction (2026-08-29): reminders were NOT replaced by Todoist
+### The reminder layer, in three acts (read this before "fixing" anything)
 
-An earlier version of this document said `reminders.json` and the cron script
-were "replaced by Todoist's API." **That is not what was built, and it would
-have been the wrong design.** Todoist is a *mirror*: it owns cross-device
-visibility and notification, but the local store remains the durable record
-and the firing source, so reminders keep working when Todoist is down,
-degraded, rate-limited, or removed. See spec §9 for the two-layer contract.
-The statement is corrected rather than deleted because it was load-bearing —
-an agent reading it could reasonably have deleted the local reminder layer.
+This document has said opposite things about reminders at different times, and
+a future reader deserves the whole arc rather than whichever sentence survived:
+
+1. **v3 planning:** "`reminders.json` and the cron script are replaced by
+   Todoist's API." That was *not* what got built.
+2. **What was built:** a two-layer design — a local store as the durable
+   firing source, with Todoist as a mirror — so the system would work without
+   a Todoist account. The plan above was corrected to match.
+3. **2026-08-29 cut:** the local layer was deleted and Todoist became the sole
+   mechanism, which is where act 1 pointed all along. See the section below
+   for why, and spec §9 for the current contract.
+
+The lesson is not "act 1 was right." Act 2 was a reasonable design for the
+audience it imagined; the mistake was imagining that audience at all.
+
+---
+
+## The 2026-08-29 simplification cut
+
+Three components were deleted deliberately. All are recoverable —
+`git checkout v3.0.0-full -- <path>` — so this section records *why*, which
+the tag does not.
+
+- **The local reminder store** (`reminders.json`, `reminder-check.py`, the
+  five-minute cron). It existed so the system would work for someone without
+  a Todoist account — a deployment the author does not run, built for
+  hypothetical users from a GitHub star count rather than a request. It cost
+  ~18% of the codebase and produced nearly all of the concurrency: two
+  processes writing one file, a lost-update race that silently erased
+  captures, a wrong-origin bug that would have retried into a nonexistent chat
+  forever, and a polling loop making ~288 API calls a day. Todoist's own
+  reliability comfortably exceeds that. **Lesson: polish is worth buying
+  freely; generality is worth buying only against a real request.**
+- **The SQLite records store** (`records.py`, `records.db`). Motivated by real
+  retrieval failures, but never used: zero rows after the system had been
+  running, while the same data was kept happily in markdown and a phone app.
+  Structured storage wins when data outgrows a context window; a single
+  person's health log never will, so **the LLM is the query engine** and a
+  series note in the vault is the better answer.
+- **The raw log's structure** (ids, typed fields, the search index). Kept as a
+  verbatim transcript, because the one genuinely unreliable component here is
+  the LLM's judgment, and the transcript is the only thing upstream of it. The
+  *machinery* went because nothing linked back to an entry any more.
+
+What the cut deliberately did NOT touch: the capture hook, the transcript
+itself, the vault routing, and the watchdogs. Those were either expensive to
+learn or cheap and load-bearing.
 
 ---
 
@@ -87,7 +123,11 @@ more than the mechanism:
   history is a non-issue for years. Revisit only if volume actually becomes a
   problem, not preemptively.
 
-### Correction (2026-08-29): the live database is never replaced
+### Historical: the live database was never to be replaced
+
+*(The SQLite store was removed later the same day — see the cut above. This is
+kept because the mistake it describes generalises to any file a running
+process holds open.)*
 
 An earlier version specified that the nightly snapshot "replaces `records.db`
 in the working tree, so every committed DB file is a consistent point-in-time
@@ -96,12 +136,11 @@ runs in WAL mode; swapping the main file while connections are open leaves a
 stale `-wal` to be checkpointed against different content. Measured outcome:
 `PRAGMA integrity_check` reporting a broken index and 201 committed rows lost.
 
-The live `records.db` is now never copied, moved, or replaced. The committed
-artifact is a separate `records-snapshot.db`, written by SQLite's backup API
-while the live file is only ever read, and `records.db*` is gitignored. See
-`tests/test_backup.py`, which exercises the checkpoint that made the old
-behaviour fail — without it the bug usually stayed invisible, which is what
-made it dangerous.
+The fix was to commit a separate snapshot written by SQLite's backup API while
+the live file was only ever read. **The general rule survives the deletion:
+never swap a file out from under a process that has it open, and when a bug
+only manifests after a later trigger (here, a WAL checkpoint), a test that
+skips that trigger will pass while the bug is still there.**
 
 ---
 
