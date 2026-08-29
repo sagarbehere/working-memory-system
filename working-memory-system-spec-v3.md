@@ -130,6 +130,30 @@ stores are gone, so the ids and fields went with them.
 
 ---
 
+## 5a. Where each type is filed
+
+`second-brain-schema.md` says what a capture *is* and how it will be
+retrieved; it deliberately names no tools. This is where that model meets this
+system.
+
+| Schema type | Filed as | Notes |
+|---|---|---|
+| Reminder | a Todoist task | Todoist owns due date, recurrence, completion and the cross-device notification (§9). |
+| Record — recurring series | ONE note per series in the vault, a line per entry (`records/blood-pressure.md`, `records/headaches.md`) | Never a note per reading. Keep the line shape stable so the file reads as a table. |
+| Record — one-off | `records/YYYY-MM-DD-<slug>.md` | Dated note, frontmatter + prose. |
+| Project | `projects/<name>.md` | `status: active` in frontmatter. |
+| Reference | `references/entities/`, `references/concepts/`, `references/procedures/` | Sub-folder per schema sub-type. |
+| Idea / Quote | `ideas/<name>.md` | Atomic, freely linked, no status. |
+| Undated task | Todoist **or** a `## Checklist` line in the relevant project note — one home, never both | Quick errand → Todoist only; project-scoped to-do → the project note. |
+| Artifact | stays where it already syncs; a Record carries `file_ref` | Per schema §9: a stable location, never a reorganizable path. |
+
+Vault notes carry `type`, `domain`, `status` (where applicable), `subtype`
+(references), and `created`/`updated` in frontmatter. Every vault write is
+committed **and pushed** — a local-only commit in a syncing repo is not backed
+up.
+
+---
+
 ## 6. Capture flow
 
 1. Message arrives on any connected client.
@@ -151,11 +175,11 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 - Output is a **list** of items, each with `text`, `kind` (`capture`/`question`/`command`), and — for `capture` items — the classification per `second-brain-schema.md` (the **`type` field itself carries the v3 class**; no separate `second_brain_type`):
   - `type`: `reminder | record | project | reference | idea`
-  - if `record`: whether it belongs to an existing series note or is a one-off dated note (schema §9)
+  - if `record`: whether it belongs to an existing series note or is a one-off dated note (schema §3.2 — frequency determines shape)
   - if `reference`: `subtype`: `entity | concept | procedure`
   - `domain`: 1+ flat tags, checked against the canonical list before coining a new one
   - if `project` or `reference`: `status`, defaulting to `active`
-  - if a `record` or `reference` involves a file: `file_ref` (schema §12)
+  - if a `record` or `reference` involves a file: `file_ref` (schema §9)
   - `reminder` (`{due_at, message}`) when `type: reminder`
 - **Habit captures split** per schema §3.1: "took vitamin D, next due Friday" →
   two items — a `record` (the completion) + a `reminder` (the next due).
@@ -168,7 +192,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 ## 8. Promotion & consolidation policy
 
-**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (schema §10 is canonical for routing) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
+**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (§5a is canonical for routing) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
 
 **Consolidation (v3):** runs on a schedule or size threshold:
 - Reference-flavored content (procedures, entity pages) can be condensed like the old topic files — it's derived and regenerable.

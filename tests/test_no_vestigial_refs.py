@@ -49,10 +49,6 @@ ALLOWED = {
     "second-brain-implementation-guide.md": "*",  # records WHY they went
     "working-memory-system-spec-v3.md": "*",    # §9 records why the layer went
     "review-notes.md": "*",                     # dated decision log; history
-    # README.md is PENDING A FULL REWRITE and still describes the pre-cut
-    # system. Remove this exemption as part of that rewrite and the guard will
-    # list exactly what needs fixing.
-    "README.md": "*",
     # These must NAME the removed things in order to check they are absent, or
     # to tell the user to clean them up.
     "verify-on-vps.sh": {"reminders.py", "records.py", "reminder-check.py",
@@ -87,6 +83,49 @@ def tracked_files():
     return [f for f in out.stdout.splitlines() if f.strip()]
 
 
+DOC_FOR = {"schema": "second-brain-schema.md", "spec": "working-memory-system-spec-v3.md"}
+
+
+def sections_in(doc):
+    """Section numbers a document actually defines, e.g. {'3', '3.1', '9'}."""
+    out = set()
+    for line in (PKG / doc).read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^#{2,4}\s+(\d+(?:\.\d+)?)[.\s]", line)
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def check_section_refs():
+    """Cross-doc '§N' pointers must resolve.
+
+    Renumbering a document silently invalidates every reference into it from
+    everywhere else, and nothing complains — a reader just follows a pointer
+    to the wrong section. Found four such breaks the first time this ran,
+    after the schema was split.
+    """
+    known = {k: sections_in(v) for k, v in DOC_FOR.items()}
+    bad = []
+    for rel in tracked_files():
+        if rel in ("tests/test_no_vestigial_refs.py", "review-notes.md"):
+            continue  # this file; and review-notes is a dated historical log
+        try:
+            text = (PKG / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for word, doc in DOC_FOR.items():
+                for num in re.findall(word + r"\s+§(\d+(?:\.\d+)?)", line):
+                    if num not in known[word]:
+                        bad.append((rel, lineno, f"{word} §{num}", doc))
+    if bad:
+        print(f"{len(bad)} broken section reference(s):\n")
+        for rel, lineno, ref, doc in bad:
+            print(f"  {rel}:{lineno}  -> {ref} does not exist in {doc}")
+        sys.exit(1)
+    return sum(len(v) for v in known.values())
+
+
 def main():
     offenders = []
     scanned = 0
@@ -118,12 +157,14 @@ def main():
         print("reintroducing the component — drop its entry from REMOVED.")
         sys.exit(1)
 
+    n_sections = check_section_refs()
+    check(n_sections > 10, f"section map built (got {n_sections})")
     check(scanned > 20, f"scanned a plausible number of files (got {scanned})")
     check(not (PKG / "reminders.py").exists(), "reminders.py is really gone")
     check(not (PKG / "records.py").exists(), "records.py is really gone")
     check(not (PKG / "reminder-check.py").exists(), "reminder-check.py is really gone")
     print(f"NO VESTIGIAL REFERENCES ({scanned} files scanned, "
-          f"{len(REMOVED)} tokens, {checks} checks)")
+          f"{len(REMOVED)} tokens, all §refs resolve, {checks} checks)")
 
 
 if __name__ == "__main__":

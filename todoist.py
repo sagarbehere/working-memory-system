@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Todoist client — the working-memory reminder layer (schema §10).
+"""Todoist client — the working-memory reminder layer (spec §9).
 
 Deterministic API client for the Todoist API v1 (api.todoist.com/api/v1/).
 Uses curl (subprocess) rather than urllib — Cloudflare's edge resets urllib's

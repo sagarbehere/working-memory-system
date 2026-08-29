@@ -154,13 +154,27 @@ covers the files; no separate backup action was warranted.
 
 ---
 
+## Considered and not built
+
+- **A daily digest / surfacing layer.** Specified in early drafts as a
+  scheduled job that would push "what's due, what's stale, what's untouched"
+  at the user each morning. Never implemented, and after the 2026-08-29 cut it
+  is actively contrary to the design: nothing invokes the agent on a schedule.
+  The failure mode of such a layer is well known — a daily message that is
+  usually not worth reading gets ignored, and then the one that mattered is
+  ignored too. Todoist already notifies for the only things with a real
+  deadline. *(Removed from the schema, where it had been sitting as though it
+  were part of the data model.)*
+- **S3-backed artifact storage.** Considered so the agent could read file
+  *contents* — OCR a PDF, search inside a scan. Rejected as speculative: it
+  solves a problem nobody has had yet, and the current design (a Record
+  pointing at wherever the file already lives) costs nothing. Revisit only
+  when there is a specific thing you tried to ask and could not.
+
 ## Deferred indefinitely
 
 Built only if a real need appears, not speculatively: confidence decay on
-Reference/Project status, S3-backed artifact storage, nested domain tags, and
-the daily digest / surfacing layer. The digest in particular is referenced by
-`second-brain-schema.md` §11 but is **out of scope and not implemented** —
-treat any mention of it as a design note, not a description of the system.
+Reference/Project status, and nested domain tags.
 
 ---
 

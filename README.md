@@ -1,68 +1,128 @@
-# Working Memory System
+# Working Memory
 
-> [!WARNING]
-> **This README is out of date and is pending a full rewrite.** On 2026-08-29
-> the system was deliberately simplified: the local reminder store, its
-> five-minute cron tick, and the SQLite records store were all removed, and
-> the raw log became a plain verbatim transcript. Reminders now live entirely
-> in Todoist. Config keys, file layout, and several components described below
-> no longer exist.
->
-> For what the system actually is today, read
-> [`CLAUDE.md`](CLAUDE.md) (orientation),
-> [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md)
-> (plumbing), and
-> [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md)
-> (why it is shaped this way).
+A personal second brain you talk to. Send a thought from any chat client; it
+gets filed. Ask later in plain language; it comes back. Anything with a
+deadline turns into a reminder that reaches every device you own.
 
-
-A capture-anywhere second brain on top of [Hermes Agent](https://hermes-agent.nousresearch.com): dump a thought in plain language from any chat, and the agent files it, organizes it, retrieves it later, and reminds you on schedule. No folders, no categories, no notes app to maintain — organizing is the system's job.
-
-**How it works**
-
-1. **Capture** — blurt a thought into any chat: prefix it with *"Hey memory"* (or *"note"*), or use a chat you've reserved for memory.
-2. **Classify** — the agent reads what you sent, splits it into separate thoughts if needed, and labels each one with its kind — a reminder, a dated fact, a project, a reference, or an idea — plus tags saying what it's about.
-3. **Store** — each thought is put where its kind belongs: structured facts (health measurements, purchases, prescriptions) → the records database; dated notes, projects, references, and ideas → the wiki (your vault); reminders → the reminder store — optionally mirrored to Todoist so they notify on every device. Without Todoist, everything still works locally.
-4. **Ask** — *"when did I last buy vitamins?"*, *"what's due this week?"* — the agent answers from wherever the thought was stored.
-
-**Classify** is the one opinionated step. Each capture gets exactly one type, chosen by retrieval shape and lifecycle — not by topic:
-
-| Type | What it is |
-|---|---|
-| `reminder` | has a due date; surfaces itself when due |
-| `record` | a dated fact — **structured** (health measurement, purchase → SQLite) or **narrative** (journal → the vault); queried by date/entity |
-| `project` | an open thread that ends in a decision or completion |
-| `reference` | evergreen knowledge (subtypes: entity · concept · procedure) |
-| `idea` | an atemporal musing, freely linked |
-
-Topic is carried by **flat tags, never folders** — folders mirror the types, tags carry the subject (a curry recipe gets `cooking, curry, indian`, not a Food folder). The types are deliberately few and extend only for a genuinely new retrieval shape (see [`second-brain-schema.md`](second-brain-schema.md)).
-
-It is, at heart, a searchable copy of the parts of your memory you choose to write down — you talk, it organizes, and it learns from corrections.
-
-Design docs: [`second-brain-schema.md`](second-brain-schema.md) (types/tags/status), [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md) (build & backup), [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md) (capture plumbing). The previous v2 line is frozen at tags `v2.0.x`, with its spec preserved there for existing users.
+It runs as a skill inside [Hermes](https://github.com/sagarbehere/hermes), a
+self-hosted personal-agent gateway, on your own machine. There is no app, no
+web UI, and nothing to log into.
 
 ---
 
-## What it does
+## Why it exists
 
-- **Capture** — send a thought; it's split into atomic notes, tagged, and filed to an append-only, git-versioned raw log.
-- **Retrieval** — ask naturally ("what did I decide about X?", "what's due this week?") and get a conversational answer.
-- **Reminders** — "remind me Tuesday 8 am to call the plumber" becomes a scheduled message delivered to the chat where you captured it.
-- **Typed routing** — captures are classified (record / project / reference / idea / reminder) and routed to the right store: SQLite for structured records, the Obsidian vault for notes, Todoist for reminders.
-- **Nightly consolidation** — duplicates collapse, superseded facts replace old ones, archives rotate. Quiet by default.
-- **Corrections** — "that's mis-filed, it's about X" / "merge A and B" / "forget Y" — handled immediately, nothing lost.
+Every note-taking system asks you to decide *where something goes* at the exact
+moment you least want to think about it — when you have a thought and want it
+out of your head. So you either stop capturing, or you accumulate an inbox you
+never process.
 
-## How it works (30 seconds)
+This inverts that. **Capture is dumb and instant; organisation happens
+afterwards, and is done for you.** You send the thought; the agent decides what
+kind of thing it is, files it, and confirms in one line. If it decides wrong,
+you say so and it moves it. Nothing is lost either way, because everything you
+said is also appended verbatim to an append-only transcript before any
+judgment is applied to it.
 
-A capture-gate hook wraps Hermes' message adapter and buffers text messages from **working-memory lanes** (see below), flushing them as one agent turn after a short debounce. The agent follows the policy in [`SKILL.md`](SKILL.md): classify → file → route → confirm. The capture log lives under one folder (`WM_ROOT`), itself a git repo for point-in-time history; curated artifacts are routed to SQLite and the Obsidian vault. Reminders are fired by a tiny cron'd script through the bot you already run (Todoist mirror optional, config-gated).
+The filing model itself is deliberately not folders-by-subject. Things are
+classified by **how you will get them back**, not what they are about — see
+[`second-brain-schema.md`](second-brain-schema.md), which is written to stand
+alone and may be useful even if you never run this code.
 
-## Prerequisites
+---
 
-- **Hermes Agent** installed and running with a connected gateway (Telegram recommended; any adapter works for marker capture).
-- **python-telegram-bot** installed in the Hermes environment (Telegram mode only).
-- **An LLM API key** configured in Hermes (the agent does the filing).
-- **crontab** available (for the reminder check; on macOS/Linux `cron` is built in).
-- **git** (used for the built-in backup repos).
+## What it looks like
+
+In a chat you have reserved for it, you just talk:
+
+```
+you   printer is out of ink
+bot   ✅ → wiki (record): printer out of ink
+
+you   remind me Tuesday at 8am to call the plumber
+bot   ✅ → Todoist: call the plumber (Tue 08:00)
+
+you   BP 128/82 this morning
+bot   ✅ → wiki (series): blood-pressure
+
+you   what's my BP been doing?
+bot   Six readings since the 12th, trending slightly up — 128/82 this
+      morning versus 121/79 two weeks ago. The two highest were both
+      after evening coffee.
+```
+
+Anywhere else — any chat, any platform — prefix with `Hey memory`:
+
+```
+you   Hey memory the plumber's number is 555-0134
+bot   ✅ → wiki (reference/entity): plumber
+```
+
+That last answer is the point of the whole design. The readings live in one
+small markdown file, so the agent reads the file and *reasons over it*. There
+is no query language to express "the two highest were after evening coffee."
+
+---
+
+## How it works
+
+Four moving parts, and the split between them is the design:
+
+**1. A capture gate** (a Hermes hook) decides whether a message is memory input
+at all — because it is in a chat you reserved, or because it starts with
+`Hey memory`. Everything else falls through as ordinary conversation. Matching
+messages are buffered for a few seconds so three thoughts typed in a row become
+one turn, not three.
+
+**2. A transcript.** Every capture is appended verbatim to a monthly markdown
+file before anything else happens. Nothing links to it and nothing is rebuilt
+from it. It exists for one reason: the agent's judgment is the only unreliable
+part of this system, and the transcript is the only thing upstream of it. If a
+thought is mis-filed — or judged to be chit-chat and not filed at all — the
+words are still there.
+
+**3. The agent** classifies and routes, following the policy in
+[`SKILL.md`](SKILL.md). This is where judgment lives, and only judgment.
+
+**4. Deterministic tools** do everything that must be exactly right — writing
+the transcript, talking to Todoist, locking, backups. The agent *calls* these;
+it never improvises the mechanics.
+
+That boundary is the rule the project is built on: **anything that must be
+correct is code the agent calls, not behaviour the agent is asked to perform.**
+When something goes wrong, the fix is usually a new constraint in a tool rather
+than a new instruction in the prompt.
+
+Where things end up:
+
+| You said | It lands in |
+|---|---|
+| Something with a deadline | Todoist — which notifies your phone, watch, laptop |
+| A repeated measurement | One growing note per series, a line per entry |
+| A fact, decision, procedure, person, idea | A typed note in your Obsidian vault |
+| A quick errand | A Todoist task, and nowhere else |
+| Anything at all | The transcript, verbatim |
+
+---
+
+## Requirements
+
+This is a personal system, published because a few people asked. It assumes:
+
+- **[Hermes](https://github.com/sagarbehere/hermes)** running on a machine of
+  yours, with at least one chat platform connected.
+- **A Todoist account.** Reminders are Todoist tasks; there is no local
+  reminder store and nothing fires from your machine. Without a token,
+  capture and notes work fine but reminders are unavailable.
+- **An Obsidian vault that is a git repo** with a remote. Notes are written
+  there and pushed after every write.
+- **A private git remote** for the data directory, so an off-box copy exists.
+- Python 3.9+. Standard library only — no dependencies to install.
+
+If you want a version that works without Todoist, this is not it. One existed
+and was deliberately removed;
+[the reasoning](second-brain-implementation-guide.md) is worth reading before
+you rebuild it.
 
 ---
 
@@ -74,162 +134,116 @@ cd working-memory-system
 ./setup.sh
 ```
 
-`setup.sh` (idempotent, safe to re-run):
-
-1. Creates the data skeleton at `~/working-memory` (`WM_ROOT`) and initializes its backup git repo.
-2. Symlinks `SKILL.md` into Hermes' skills directory and the hook into `~/.hermes/hooks/`.
-3. Installs the cron/helper scripts as wrappers in `~/.hermes/scripts/` — real files that exec the package copies (the package is the single source of truth; edits apply immediately, no refresh step).
-4. Writes `~/.hermes/working-memory.env` from `.env.example` — **never overwrites** an existing file.
+`setup.sh` is idempotent — safe to re-run after every update. It creates the
+data directory, installs the skill and capture hook as symlinks, writes wrapper
+scripts into `~/.hermes/scripts/`, and writes a config file it will never
+overwrite.
 
 Then:
 
-1. **Reminder delivery** — Telegram users: `crontab -e` and paste the line from [`crontab.example`](crontab.example) (every 5 minutes; adjust paths). **No Telegram?** Skip the crontab and instead register a Hermes no_agent cron job (every 5 minutes, `script=reminder-check.py`, deliver to your home channel) — the script prints only due reminders, which the scheduler delivers verbatim to whatever channel Hermes speaks on.
-2. **Restart the gateway** so the hook loads: `hermes gateway restart` (run from SSH/terminal, *not* from inside an agent session — it deadlocks there).
-3. **`/reload-skills`** in your chat so the agent picks up the `working-memory` skill.
+1. **Configure** `~/.hermes/working-memory.env` — at minimum `WM_VAULT_PATH`
+   (your vault) and, if it is not your machine's zone, `WM_TZ`.
+2. **Add your Todoist token** as `TODOIST_API_TOKEN` in `~/.hermes/.env`, and
+   set `TODOIST_MIRROR_ENABLED=true` in the working-memory env file.
+3. **Give the data directory a remote:**
+   `git -C ~/working-memory remote add origin <your-private-repo>`
+4. **Register two Hermes cron jobs**, both `no_agent` — a nightly
+   `wm-backup-push.py` and a monthly `cron-session-prune.py`. Neither invokes
+   the agent; neither costs tokens. There is no OS crontab entry.
+5. **Restart the gateway** so the hook loads: `hermes gateway restart` (from a
+   shell, not from inside an agent session).
+6. **`/reload-skills`** in your chat client.
 
-That's it — **marker capture already works everywhere** (next section). The Telegram lane is an optional frictionless upgrade.
+Verify the whole install at any time:
 
----
-
-## Set up your capture surface
-
-The system has **three input modes**, all active at once. Pick what suits you:
-
-### Option A — Markers: any chat, any platform (zero config) ⭐
-
-Working-memory input is any message that **starts with `Hey memory` or `note`** (case-insensitive, word boundary):
-
-```
-note the printer warranty expires in March
-Hey memory remind me Tuesday 8 am to call the plumber
-Hey memory what did I decide about the printer?
+```bash
+./verify-on-vps.sh
 ```
 
-Works from *any* chat or client — Telegram, the web UI, the CLI — with no setup at all. The marker is stripped at filing time; a short 5-second debounce merges quick follow-up messages into one entry.
-
-### Option B — Reserve a chat: marker-free lane (any platform)
-
-Turn *any* chat into a dedicated memory lane, no markers needed:
-
-- Send **`reserve for memory`** in the chat → it's recorded in `$WM_ROOT/meta/lanes.json` and **from then on no markers are needed: every message in that chat is memory input until you send `release for memory`**.
-- **`release for memory`** undoes it.
-
-This is chat-identity-based (chat + thread), not session-based: `/new`, compression, or restarts don't disconnect the lane.
-
-### Option C — Telegram dedicated lane (the frictionless classic)
-
-The original design: a dedicated chat where *every* message is captured. Same bot, same token — no new bot. Two ways to make it:
-
-**C1. Private group (simplest):**
-1. Create a Telegram group containing only you + your Hermes bot.
-2. Make sure the bot may respond there: add the group id to `group_allowed_chats` under the telegram platform config in `~/.hermes/config.yaml`.
-3. Set `WM_TELEGRAM_CHAT_ID` to the group's id in `~/.hermes/working-memory.env`.
-
-**C2. DM topic lane (no group needed):**
-1. Enable DM topics with the bot (`/topic` — see its help for the one-time setup).
-2. Use one topic (e.g. "Working Memory") as the lane.
-3. Set both `WM_TELEGRAM_CHAT_ID` and `WM_TELEGRAM_THREAD_ID` in `~/.hermes/working-memory.env`.
-4. *Optional but nice:* bind the skill to the topic in `~/.hermes/config.yaml` so the working-memory skill auto-loads natively (the hook already stamps it regardless — this is a second, config-level layer):
-
-   ```yaml
-   platforms:
-     telegram:
-       extra:
-         dm_topics:
-           - chat_id: <CHAT_ID>
-             topics:
-               - name: Working Memory
-                 thread_id: <THREAD_ID>
-                 skill: working-memory
-   ```
-
-5. Restart the gateway from SSH: `hermes gateway restart`.
-
-> Reminders fire back into the chat where they were captured (origin recorded per reminder), falling back to the home channel when the origin isn't deliverable.
+Read-only against your data, and it reports what is missing rather than
+guessing.
 
 ---
 
 ## Using it
 
-| You say | What happens |
+**Reserve a chat** so you can skip the marker: say `reserve for memory` in it.
+`release for memory` undoes that. Everywhere else, start with `Hey memory`.
+
+| Say | What happens |
 |---|---|
-| `note printer is out of ink` | Captured, tagged, filed |
-| `Hey memory what's due this week?` | Pending reminders listed, soonest first |
-| `what did I decide about the printer?` | Answered from the topic file / raw log |
-| `remind me Tue 8 am to call the plumber` | Reminder scheduled, fires Tue 8 am |
-| `.` or `/done` | Flush the buffer immediately (skip the debounce wait) |
-| `that's mis-filed, it's about X` | Entry re-tagged, topic files regenerated |
-| `merge printer and electronics` | Topics merged (raw log untouched) |
-| `forget what I said about the taxi driver` | Fact struck from topic + raw entry (the one destructive action — the agent confirms first) |
+| `printer is out of ink` | Filed as a record; one-line confirmation |
+| `remind me Friday 9am to renew the passport` | Todoist task, due Friday 09:00 |
+| `every monday 9am water the plants` | Recurring Todoist task |
+| `buy stamps` | Todoist task only — no note |
+| `what's due this week?` | Answered from Todoist, soonest first |
+| `what did I decide about the printer?` | Answered from the note |
+| `did I ever mention the taxi driver?` | Searches the transcript |
+| `that should be a project, not an idea` | Re-filed |
+| `mark the plumber task done` | Closed in Todoist |
+| `forget what I said about X` | Confirms, then removes the note and task |
+| `.` | Flush the buffer now instead of waiting for the debounce |
 
-**In the Telegram lane**, no markers are needed — just send the thought. **Everywhere else**, prefix with `Hey memory`/`note`, or reserve the chat once with `reserve for memory`.
-
----
-
-## Storage layout
-
-```
-~/working-memory/            # WM_ROOT (git repo = point-in-time backup)
-  raw/2026-08.md             # append-only raw entries, one file per month
-  raw/archive/               # rotated raw files (> WM_RAW_RETENTION_DAYS)
-  topics/<tag>.md            # derived topic files (regenerable)
-  reminders.json             # pending reminders {id, due_at, message, ...}
-  logs/2026-08.log           # operational trail, JSON lines (~30 day retention)
-  meta/tag-index.json        # tag -> entry ids + occurrence counts
-  meta/pending-buffer.json   # unflushed capture buffer (hook-managed)
-  meta/lanes.json            # reserved chats (reserve/release)
-  meta/refinement-log.md     # curated patterns worth reviewing (spec §17)
-```
-
-Everything durable lives under `WM_ROOT`; a full backup is archiving that one folder (or its git history).
-
-## Configuration (`~/.hermes/working-memory.env`)
-
-| Key | Default | Meaning |
-|---|---|---|
-| `WM_ROOT` | `~/working-memory` | storage root |
-| `WM_DEBOUNCE_SECONDS` | `5` | silence window before a buffered message flushes as one agent turn |
-| `WM_PROMOTE_AFTER` | `2` | tag occurrences before a topic file is created |
-| `WM_CONDENSE_SIZE` | `2500` | topic-file bytes that trigger condense-on-write |
-| `WM_RAW_RETENTION_DAYS` | `90` | raw files older than this move to `raw/archive/` |
-| `WM_CONFIRM` | `1` | brief "logged …" confirmation after each buffer |
-| `WM_TELEGRAM_CHAT_ID` | *(optional)* | legacy Telegram lane; empty = no lane (markers still work) |
-| `WM_TELEGRAM_THREAD_ID` | *(optional)* | topic lane within the WM chat |
+Two things to know. **The transcript is never edited** — "forget X" removes
+what was *derived*, and the agent will tell you the words remain. And **you
+should never see an approval prompt** during a capture; if you do, a tool is
+missing and that is the bug.
 
 ---
 
-## Maintenance
+## What is where
 
-- **Reminder delivery** — two modes, auto-detected by `reminder-check.py`:
-  - *Telegram mode* (OS crontab line, every 5 min): sends via the existing bot into the chat where each reminder was captured. If it stops, reminders queue up and fire late; check `~/.hermes/logs/wm-reminders.log`.
-  - *stdout mode* (no Telegram configured): the script prints each due reminder to stdout and marks it fired — wire it as a Hermes no_agent cron job (every 5 minutes, `script=reminder-check.py`, deliver to your home channel) and the scheduler delivers the lines verbatim. Diagnostics go to stderr; stdout carries only reminder lines.
-- **Nightly consolidation** — a *Hermes* cron job (separate from the OS crontab), schedule `30 2 * * *`, with `wm-consolidation-gate.py` as its context script: the gate emits a work-digest only when there IS work, so quiet nights are normal (no tokens, no delivery). Register it on a new machine by asking your agent: *"recreate the working-memory consolidation cron job"* — the policy ships in SKILL.md, only the registration is per-install.
-- **Monthly session prune** — optional watchdog: `cron-session-prune.py` (no-agent cron job, silent unless it pruned something).
-- **After a Hermes update** — normally nothing to do: the wrapper scripts exec the package copies, so edits apply immediately; re-run `./setup.sh` only if the package moved or a new helper script was added (the skill/hook symlinks survive on their own).
-- **Refinement loop (spec §17)** — the agent logs recurring frictions; numeric threshold tweaks are auto-applied (logged), policy changes to SKILL.md are proposed for your sign-off, and the deterministic code is never self-edited.
+```
+~/working-memory/          # your data — its own git repo, pushed nightly
+  raw/2026-08.md           #   the transcript, one file per month
+  logs/                    #   operational log, pruned after 30 days
+  meta/lanes.json          #   which chats you reserved
+  todoist-export.jsonl     #   nightly export of open tasks
 
-## Troubleshooting
+<your vault>/              # notes, synced by your own setup
+  records/ projects/ references/ ideas/
+```
 
-- **Gateway restart deadlocks** — restart from SSH/terminal, not from inside an agent session (graceful drain waits for active agents).
-- **Hook not loading** — `hermes gateway restart` after install; the hook binds at `gateway:startup`.
-- **Silent consolidation nights** — normal by design (gated job). Only a *delivery* when there's work.
-- **Unflushed buffer after a restart** — reloaded on the next message for that chat; worst case it waits for the next message or `.`/`/done`. Never dropped.
+Everything durable is in those two directories, and both are git repos. A full
+backup is a `git clone`.
 
-## Uninstall
+---
+
+## Health
+
+`wm-backup-push.py` runs nightly and **prints nothing when all is well.**
+Anything it does say is a real problem: a failed push, an unpushed vault
+commit, something that has been failing quietly. That silence is deliberate —
+a watchdog that speaks every day is one you stop reading.
 
 ```bash
-rm ~/.hermes/hooks/working-memory-debounce
-rm ~/.hermes/skills/note-taking/working-memory/SKILL.md
-rm ~/.hermes/scripts/wm-consolidation-gate.py ~/.hermes/scripts/cron-session-prune.py
-# remove the crontab line, the Hermes cron jobs, and delete ~/working-memory if you want the data gone
+python3 tests/run_all.py    # 8 suites, no network, no live data touched
 ```
 
-## Notes & known limits
+---
 
-- **Text-first captures** — the raw log stores text. Photos and locations are handled as ordinary messages and never become entries on their own; a photo with a caption in a reserved lane captures the caption text. If you want an image remembered, say so in words (e.g. `note the plumber's receipt is in my photos`).
-- **Backup** — the on-box git history is the audit trail; a nightly cron (`wm-backup-push.py`, 03:00, no_agent) pushes `WM_ROOT` to a private GitHub remote (off-box copy lags at most 24 h) and alerts on failure. Setup: create an empty private repo, add it as `origin`, widen the PAT to include it.
-- The package deliberately contains **no** bot token flow, no Telegram client, no scheduler daemon — it reuses the infrastructure Hermes already runs.
+## Design notes
 
-## License
+The interesting parts are written down, mostly because they were mistakes
+first:
 
-MIT — see [LICENSE](LICENSE).
+- [`second-brain-schema.md`](second-brain-schema.md) — the information model.
+  Tool-independent; the most reusable thing here.
+- [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md) — how
+  this system actually works, in English.
+- [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md)
+  — decisions, and things deliberately *not* built. Read this before adding
+  anything.
+- [`CLAUDE.md`](CLAUDE.md) — orientation for a coding agent working on the
+  repo.
+
+This system used to be roughly twice its current size. It had a local reminder
+store that duplicated Todoist, a SQLite database for structured records, and a
+nightly job to consolidate everything. All three were removed in one pass. The
+short version: the reminder store was built for hypothetical users who never
+asked; the database was built because it seemed like it would be useful, and
+held zero rows; and the nightly job reported work that had already been done at
+capture time. The full reasoning is in the decisions document, and the deleted
+code is one command away at the tag `v3.0.0-full`.
+
+MIT licensed. Built for one person; you are welcome to it.
