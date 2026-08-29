@@ -187,7 +187,7 @@ Approval boundary:
   SKILL.md edits; canonical-tag coining at capture time is exempt —
   do-then-inform, schema §6) — present a before/after diff and WAIT.
 - **Sanctioned code flow (your approval):** on approval of a `CODE
-  IMPROVEMENT` entry, implement on the `v3.0.0` branch — spec + skill + code
+  IMPROVEMENT` entry, implement on `main` — spec + skill + code
   together (docs describe the actual system), run the records.py round-trip
   test, commit + push. Nothing goes live without your go.
 - **Never self-patch:** deterministic code outside that sanctioned flow —
@@ -206,5 +206,5 @@ Approval boundary:
 Not clearly covered? Consult in order: `second-brain-implementation-guide.md`
 (routing/backup decisions) → `second-brain-schema.md` (type/tag/status model)
 → `working-memory-system-spec-v3.md` (plumbing rationale) → `logs/` (past
-runs). SKILL.md is git-versioned on the `v3.0.0` branch — every accepted
+runs). SKILL.md is git-versioned on `main` — every accepted
 refinement is diffable and revertible.

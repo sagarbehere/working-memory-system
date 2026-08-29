@@ -13,8 +13,8 @@ Run steps:
   2. Best-effort Todoist export (JSONL of open tasks) -> todoist-export.json.
   3. git add -A + commit (only when something changed) in WM_ROOT.
   4. git push origin main — the private remote (off-box copy <= 24 h lag).
-  5. Vault sync check: git fetch in ~/wiki; alert on drift (review-notes
-     decision 7).
+  5. Vault sync: git fetch + pull --ff-only when behind (devices push
+     legitimately); alert only on unpushed local commits or a failed pull.
 
 Exit 0 whenever the run completed; alerts are carried in stdout (the
 no_agent scheduler delivers stdout verbatim). Exceptions are caught and
@@ -100,7 +100,9 @@ def main():
             f"PAT covers it: {(r.stderr or r.stdout).strip()}"
         )
 
-    # 5. Vault sync check (review-notes decision 7)
+    # 5. Vault sync (review-notes decision 7, refined 2026-08-29): devices
+    #    push legitimately, so pull --ff-only when behind (silent); alert
+    #    only on unpushed local commits (ahead) or a failed pull.
     if os.path.isdir(os.path.join(WIKI, ".git")):
         r = run(["git", "-C", WIKI, "fetch", "origin"])
         if r.returncode != 0:
@@ -111,10 +113,17 @@ def main():
                 left, _, right = r.stdout.strip().partition("\t")
                 ahead = left.strip() or "0"
                 behind = right.strip() or "0"
-                if ahead != "0" or behind != "0":
+                if behind != "0":
+                    r = run(["git", "-C", WIKI, "pull", "--ff-only", "-q"])
+                    if r.returncode != 0:
+                        alerts.append(
+                            "WM backup: vault pull --ff-only failed (dirty tree or "
+                            f"diverged?): {(r.stderr or r.stdout).strip()}"
+                        )
+                if ahead != "0":
                     alerts.append(
-                        f"WM backup: vault out of sync — ~/wiki is ahead {ahead}, "
-                        f"behind {behind} vs origin."
+                        f"WM backup: vault has unpushed local commits — ~/wiki is "
+                        f"ahead {ahead} vs origin (push needed)."
                     )
     else:
         alerts.append("WM backup: no ~/wiki clone — vault sync check skipped.")
