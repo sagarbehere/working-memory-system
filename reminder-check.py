@@ -25,11 +25,14 @@ Two delivery modes:
   reminder lines; diagnostics go to stderr.
 
 v3 (second brain): when TODOIST_MIRROR_ENABLED=true and TODOIST_API_TOKEN is
-set, pending reminders mirror into Todoist (project TODOIST_PROJECT) at each
-tick; mirrored reminders are NOT fired locally (Todoist's notification is the
+set, the agent mirrors each reminder into Todoist (project TODOIST_PROJECT)
+synchronously at capture time. This tick is the durable CATCH-UP for that
+mirror, not the primary path: any pending reminder still lacking a todoist_id
+(the synchronous call failed, timed out, or never ran) is mirrored here.
+Mirrored reminders are NOT fired locally (Todoist's notification is the
 reminder) but stay as the durable record + fallback; completion is reconciled
 back (a task closed in Todoist marks the local entry done). Without the token,
-behavior is exactly v2: local firing only.
+only the local layer runs: local firing, exactly as before Todoist existed.
 
 Stdlib only. Safe to run concurrently (flock single-flight guard).
 """
