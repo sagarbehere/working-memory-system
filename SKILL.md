@@ -21,7 +21,7 @@ immutable, full-text capture record and audit trail** (`$WM_ROOT/raw/`)
 exports), not a rebuild from the log.
 
 **Read before operating:** `second-brain-schema.md` (type/tag/status model —
-read this first), `second-brain-implementation-guide.md` (routing/backup
+read this first), `decisions.md` (routing/backup
 rationale), `working-memory-system-spec-v3.md` (capture plumbing), then
 `logs/` (what actually happened). Same three-tier escalation as v2, extended.
 
@@ -199,7 +199,7 @@ Approval boundary:
 
 ## Escalation
 
-Not clearly covered? Consult in order: `second-brain-implementation-guide.md`
+Not clearly covered? Consult in order: `decisions.md`
 (routing/backup decisions) → `second-brain-schema.md` (type/tag/status model)
 → `working-memory-system-spec-v3.md` (plumbing rationale) → `logs/` (past
 runs). SKILL.md is git-versioned on `main` — every accepted

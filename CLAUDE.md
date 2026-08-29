@@ -35,7 +35,6 @@ wmlib.py                  env parsing, timezone, logging, atomic writes, locking
 rawlog.py                 the raw capture log (CLI) — owns the on-disk entry format
 todoist.py                Todoist client + CLI — the reminder layer
 wm-backup-push.py         cron: nightly backup + health watchdog (silent when well)
-cron-session-prune.py     cron: monthly session cleanup
 hooks/working-memory-debounce/handler.py
                           the capture gate — monkey-patches Hermes' inbound seam
 SKILL.md                  the agent's policy (installed as a Hermes skill)
@@ -50,7 +49,7 @@ Design docs, in the order worth reading:
    explains *why* captures are classified the way they are.
 2. `working-memory-system-spec-v3.md` — the plumbing: storage layout, capture
    flow, reminder scheduler, error handling.
-3. `second-brain-implementation-guide.md` — decisions and rejected
+3. `decisions.md` — decisions and rejected
    alternatives: why things are as they are, and what is absent on purpose.
    Deliberately not a description of the system.
 
@@ -130,9 +129,9 @@ effect immediately — no refresh step.
 stale copy waiting to happen — that exact situation once put a superseded
 script in the scheduler's path.
 
-Current scheduled work — all inside Hermes, **no OS crontab entry, and no job
-that invokes the agent**: `wm-backup-push.py` (nightly no_agent) and
-`cron-session-prune.py` (monthly no_agent).
+Current scheduled work: exactly one job — `wm-backup-push.py`, a nightly
+Hermes `no_agent` entry. **No OS crontab entry, and nothing that invokes the
+agent.**
 
 ## Testing
 

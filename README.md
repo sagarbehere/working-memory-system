@@ -1,14 +1,10 @@
-# Working Memory
+# Working Memory System
 
-A personal second brain you talk to. Send a thought from any chat client; it
-gets filed. Ask later in plain language; it comes back. Anything with a
-deadline turns into a reminder that reaches every device you own.
-
-It runs as a skill inside [Hermes](https://hermes-agent.nousresearch.com/) —
-an open-source, self-hosted agent framework that connects to Telegram,
-Discord, Slack, Signal, email and more, and keeps one memory across all of
-them. This project has no app and no UI of its own: your chat client is the
-interface.
+A personal second brain you talk to, built on top of
+[Hermes](https://hermes-agent.nousresearch.com/). Send a thought from any
+Hermes chat client; it gets filed. Ask later in plain language; it comes back.
+Anything with a deadline turns into a reminder that reaches every device you
+own.
 
 ---
 
@@ -19,17 +15,21 @@ moment you least want to think about it — when you have a thought and want it
 out of your head. So you either stop capturing, or you accumulate an inbox you
 never process.
 
-This inverts that. **Capture is dumb and instant; organisation happens
-afterwards, and is done for you.** You send the thought; the agent decides what
-kind of thing it is, files it, and confirms in one line. If it decides wrong,
-you say so and it moves it. Nothing is lost either way, because everything you
-said is also appended verbatim to an append-only transcript before any
-judgment is applied to it.
+This inverts that. **Capture is instant and thoughtless; the organising is done
+for you.** You send the thought and Hermes decides what kind of thing it is,
+files it, and confirms in one line. You never choose a folder, a tag, or a
+format. If it files something somewhere you disagree with, you say so and it
+moves it — a five-second correction rather than a decision you had to make in
+advance.
 
-The filing model itself is deliberately not folders-by-subject. Things are
-classified by **how you will get them back**, not what they are about — see
-[`second-brain-schema.md`](second-brain-schema.md), which is written to stand
-alone and may be useful even if you never run this code.
+The way notes are organised is deliberately *not* folders-by-subject. Instead
+there is a highly opinionated — and, we'd argue, unusual — model based on **how
+a note will be retrieved and what its content's lifecycle looks like**, rather
+than which knowledge domain it belongs to. A recipe, a blood-pressure reading
+and a passport renewal are filed by the shape of the question you will later
+ask about them, not by whether they are "health" or "admin". That model is
+written up in [`second-brain-schema.md`](second-brain-schema.md), which stands
+on its own and may be useful even if you never run this code.
 
 ---
 
@@ -53,47 +53,44 @@ bot   Six readings since the 12th, trending slightly up — 128/82 this
       after evening coffee.
 ```
 
-Anywhere else — any chat, any platform — prefix with `Hey memory`:
+That last answer is the point of the whole design. The readings live in one
+small markdown file, so the agent reads the whole file and *reasons over it*.
+There is no query language that can express "the two highest were after evening
+coffee" — but a model reading forty lines can simply notice it.
+
+Anywhere else — any chat Hermes is connected to — prefix with `Hey memory`:
 
 ```
 you   Hey memory the plumber's number is 555-0134
 bot   ✅ → wiki (reference/entity): plumber
 ```
 
-That last answer is the point of the whole design. The readings live in one
-small markdown file, so the agent reads the file and *reasons over it*. There
-is no query language to express "the two highest were after evening coffee."
-
 ---
 
 ## How it works
 
-Four moving parts, and the split between them is the design:
+Four moving parts:
 
 **1. A capture gate** (a Hermes hook) decides whether a message is memory input
 at all — because it is in a chat you reserved, or because it starts with
 `Hey memory`. Everything else falls through as ordinary conversation. Matching
-messages are buffered for a few seconds so three thoughts typed in a row become
-one turn, not three.
+messages are buffered for a few seconds, so three thoughts typed in a row
+become one turn rather than three.
 
 **2. A transcript.** Every capture is appended verbatim to a monthly markdown
 file before anything else happens. Nothing links to it and nothing is rebuilt
-from it. It exists for one reason: the agent's judgment is the only unreliable
-part of this system, and the transcript is the only thing upstream of it. If a
-thought is mis-filed — or judged to be chit-chat and not filed at all — the
-words are still there.
+from it. It exists so that no message is ever lost to a judgment call: if a
+message to the memory system is mis-filed — or judged to be chit-chat and not
+filed at all — its content is still saved in the transcript.
 
 **3. The agent** classifies and routes, following the policy in
-[`SKILL.md`](SKILL.md). This is where judgment lives, and only judgment.
+[`SKILL.md`](SKILL.md). This is where the judgment lives: what kind of thing is
+this, and where does it belong.
 
-**4. Deterministic tools** do everything that must be exactly right — writing
-the transcript, talking to Todoist, locking, backups. The agent *calls* these;
-it never improvises the mechanics.
-
-That boundary is the rule the project is built on: **anything that must be
-correct is code the agent calls, not behaviour the agent is asked to perform.**
-When something goes wrong, the fix is usually a new constraint in a tool rather
-than a new instruction in the prompt.
+**4. A small set of tools** handles the mechanics — appending to the
+transcript, talking to Todoist, locking, backups. The agent calls them rather
+than reinventing each step, so a transcript entry and a Todoist call come out
+the same shape every time.
 
 Where things end up:
 
@@ -112,20 +109,20 @@ Where things end up:
 This is a personal system, published because a few people asked. It assumes:
 
 - **[Hermes](https://hermes-agent.nousresearch.com/)** running on a machine of
-  yours, with at least one chat platform connected. Everything below assumes a
-  working Hermes install — that is the thing this plugs into.
+  yours, with at least one chat platform connected. Install it first — this
+  plugs into it.
 - **A Todoist account.** Reminders are Todoist tasks; there is no local
-  reminder store and nothing fires from your machine. Without a token,
-  capture and notes work fine but reminders are unavailable.
+  reminder store and nothing fires from your machine. Without a token, capture
+  and notes work fine but reminders are unavailable.
 - **An Obsidian vault that is a git repo** with a remote. Notes are written
   there and pushed after every write.
-- **A private git remote** for the data directory, so an off-box copy exists.
+- **A private git remote** for the data directory, so an off-box copy of your
+  transcript exists.
 - Python 3.9+. Standard library only — no dependencies to install.
 
 If you want a version that works without Todoist, this is not it. One existed
-and was deliberately removed;
-[the reasoning](second-brain-implementation-guide.md) is worth reading before
-you rebuild it.
+and was deliberately removed; [the reasoning](decisions.md) is worth reading
+before you rebuild it.
 
 ---
 
@@ -138,21 +135,24 @@ cd working-memory-system
 ```
 
 `setup.sh` is idempotent — safe to re-run after every update. It creates the
-data directory, installs the skill and capture hook as symlinks, writes wrapper
-scripts into `~/.hermes/scripts/`, and writes a config file it will never
-overwrite.
+data directory and its git repo, installs the skill and capture hook as
+symlinks, writes wrapper scripts into `~/.hermes/scripts/`, and creates
+`~/.hermes/working-memory.env` from the shipped example. It never overwrites an
+existing config.
 
 Then:
 
-1. **Configure** `~/.hermes/working-memory.env` — at minimum `WM_VAULT_PATH`
-   (your vault) and, if it is not your machine's zone, `WM_TZ`.
-2. **Add your Todoist token** as `TODOIST_API_TOKEN` in `~/.hermes/.env`, and
-   set `TODOIST_MIRROR_ENABLED=true` in the working-memory env file.
+1. **Edit** `~/.hermes/working-memory.env` — at minimum `WM_VAULT_PATH` (your
+   vault), `TODOIST_MIRROR_ENABLED=true`, and `WM_TZ` if it differs from the
+   machine's zone.
+2. **Add your Todoist token** as `TODOIST_API_TOKEN` in `~/.hermes/.env` —
+   Hermes' own secrets file, where your bot tokens already live. Secrets go
+   there; everything else in the working-memory env file above.
 3. **Give the data directory a remote:**
    `git -C ~/working-memory remote add origin <your-private-repo>`
-4. **Register two Hermes cron jobs**, both `no_agent` — a nightly
-   `wm-backup-push.py` and a monthly `cron-session-prune.py`. Neither invokes
-   the agent; neither costs tokens. There is no OS crontab entry.
+4. **Register one Hermes cron job**: `wm-backup-push.py`, nightly, `no_agent`.
+   That is the only scheduled work — nothing invokes the agent on a timer, and
+   there is no OS crontab entry.
 5. **Restart the gateway** so the hook loads: `hermes gateway restart` (from a
    shell, not from inside an agent session).
 6. **`/reload-skills`** in your chat client.
@@ -188,9 +188,9 @@ guessing.
 | `.` | Flush the buffer now instead of waiting for the debounce |
 
 Two things to know. **The transcript is never edited** — "forget X" removes
-what was *derived*, and the agent will tell you the words remain. And **you
-should never see an approval prompt** during a capture; if you do, a tool is
-missing and that is the bug.
+what was *derived* from a message, and the agent will tell you the words
+remain. And **you should never see an approval prompt** during a capture; if
+you do, a tool is missing and that is the bug.
 
 ---
 
@@ -207,17 +207,13 @@ missing and that is the bug.
   records/ projects/ references/ ideas/
 ```
 
-Everything durable is in those two directories, and both are git repos. A full
-backup is a `git clone`.
-
 ---
 
 ## Health
 
-`wm-backup-push.py` runs nightly and **prints nothing when all is well.**
-Anything it does say is a real problem: a failed push, an unpushed vault
-commit, something that has been failing quietly. That silence is deliberate —
-a watchdog that speaks every day is one you stop reading.
+`wm-backup-push.py` runs nightly and prints nothing when all is well. Anything
+it does say is a real problem: a failed push, an unpushed vault commit, or
+something that has been failing quietly.
 
 ```bash
 python3 tests/run_all.py    # 8 suites, no network, no live data touched
@@ -227,26 +223,13 @@ python3 tests/run_all.py    # 8 suites, no network, no live data touched
 
 ## Design notes
 
-The interesting parts are written down, mostly because they were mistakes
-first:
-
 - [`second-brain-schema.md`](second-brain-schema.md) — the information model.
   Tool-independent; the most reusable thing here.
 - [`working-memory-system-spec-v3.md`](working-memory-system-spec-v3.md) — how
-  this system actually works, in English.
-- [`second-brain-implementation-guide.md`](second-brain-implementation-guide.md)
-  — decisions, and things deliberately *not* built. Read this before adding
-  anything.
+  this system works, in English.
+- [`decisions.md`](decisions.md) — decisions made, alternatives rejected, and
+  things deliberately *not* built. Read this before adding anything.
 - [`CLAUDE.md`](CLAUDE.md) — orientation for a coding agent working on the
   repo.
-
-This system used to be roughly twice its current size. It had a local reminder
-store that duplicated Todoist, a SQLite database for structured records, and a
-nightly job to consolidate everything. All three were removed in one pass. The
-short version: the reminder store was built for hypothetical users who never
-asked; the database was built because it seemed like it would be useful, and
-held zero rows; and the nightly job reported work that had already been done at
-capture time. The full reasoning is in the decisions document, and the deleted
-code is one command away at the tag `v3.0.0-full`.
 
 MIT licensed. Built for one person; you are welcome to it.

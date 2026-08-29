@@ -4,7 +4,7 @@
 #
 # Includes:
 #   - the package (working-memory-system/): source, SKILL.md, hook, scripts
-#     (rawlog.py, todoist.py, wm-backup-push.py, cron-session-prune.py,
+#     (rawlog.py, todoist.py, wm-backup-push.py,
 #     setup.sh, export.sh), spec, tests, backups/, and its .git history
 #   - the data (working-memory/): the raw transcript, meta/,
 #     refinement log, and its .git history (point-in-time recovery)
@@ -93,13 +93,11 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "                     thread_id: <thread_id>"
     echo "                       skill: working-memory"
     echo "  5) No OS crontab entry is needed (see crontab.example)."
-    echo "  6) Re-create the Hermes cron jobs — they live in Hermes\'s cron"
+    echo "  6) Re-create the Hermes cron job — they live in Hermes\'s cron"
     echo "     store, not in this archive. Both are no_agent watchdogs; there"
     echo "     is deliberately NO job that invokes the agent. Ask your agent:"
-    echo "     a) \"recreate the nightly working-memory backup push job\""
+    echo "     \"recreate the nightly working-memory backup push job\""
     echo "        (no_agent, 03:00 daily, script=wm-backup-push.py)."
-    echo "     b) \"recreate the monthly cron-session prune job\""
-    echo "        (no_agent, monthly, silent unless it pruned something)."
     echo "  7) Restart the gateway (from SSH):  hermes gateway restart"
     echo "  8) /reload-skills in Telegram so sessions pick up the skill."
     echo

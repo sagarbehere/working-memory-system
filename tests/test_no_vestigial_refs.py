@@ -38,6 +38,7 @@ REMOVED = {
     "reminder-check.lock": "the tick lock; there is no tick",
     "reminders.lock": "the reminder store lock; there is no store",
     "wm-consolidation-gate.py": "the nightly gate; nothing schedules the agent",
+    "cron-session-prune.py": "pruned sessions the deleted nightly job created",
     "WM_RAW_RETENTION_DAYS": "raw rotation; search reads the archive anyway",
 }
 
@@ -46,17 +47,18 @@ REMOVED = {
 # token in that file.
 ALLOWED = {
     "tests/test_no_vestigial_refs.py": "*",     # this file lists them
-    "second-brain-implementation-guide.md": "*",  # records WHY they went
+    "decisions.md": "*",  # records WHY they went
     "working-memory-system-spec-v3.md": "*",    # §9 records why the layer went
     "review-notes.md": "*",                     # dated decision log; history
     # These must NAME the removed things in order to check they are absent, or
     # to tell the user to clean them up.
     "verify-on-vps.sh": {"reminders.py", "records.py", "reminder-check.py",
                          "records.db", "reminders.json", "records-snapshot.db",
-                         "tag-index.json", "wm-consolidation-gate.py"},
+                         "tag-index.json", "wm-consolidation-gate.py",
+                         "cron-session-prune.py"},
     "setup.sh": {"records.db", "reminders.json", "records-snapshot.db",
                  "reminder-check.py", "reminders.py", "records.py",
-                 "wm-consolidation-gate.py"},
+                 "wm-consolidation-gate.py", "cron-session-prune.py"},
     "crontab.example": {"reminder-check.py"},
     # Strips field lines from entries written before the cut; must name them.
     "rawlog.py": {"record_kind"},

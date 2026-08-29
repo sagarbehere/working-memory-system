@@ -1,6 +1,6 @@
 # Working Memory System — Implementation Spec
 
-**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. This copy describes **v3.0.0**, forked from the frozen **v2.0.0** tag and evolving independently in its own branch — see the versioning note at the end of this document. For type/tag/status classification, see `second-brain-schema.md`. For build, storage-routing, and backup mechanics, see `second-brain-implementation-guide.md`.
+**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. This copy describes **v3.0.0**, forked from the frozen **v2.0.0** tag and evolving independently in its own branch — see the versioning note at the end of this document. For type/tag/status classification, see `second-brain-schema.md`. For build, storage-routing, and backup mechanics, see `decisions.md`.
 
 ## Purpose
 
@@ -331,4 +331,4 @@ Goal: let Hermes notice when SKILL.md or the underlying design has a gap, withou
 
 This document (`working-memory-system-spec-v3.md`) is the **v3.0.0** branch's own copy of the spec, forked from the **v2.0.0** tag — the version tagged and frozen for the current public release, including existing Reddit users, who can rely on `working-memory-system-spec.md` at that tag not changing further.
 
-v3.0.0 reuses and adapts the plumbing in Sections 1-17 above rather than rebuilding it, and may continue to evolve this document independently of v2.0.0 as the branch develops. It's paired with `second-brain-schema.md` (the type/tag/status classification model) and `second-brain-implementation-guide.md` (build order, storage routing, backup plan) — together, the three documents that describe v3.0.0 in full. A v3.0.0 install is never affected by changes to the frozen v2.0.0 tag, and vice versa.
+v3.0.0 reuses and adapts the plumbing in Sections 1-17 above rather than rebuilding it, and may continue to evolve this document independently of v2.0.0 as the branch develops. It's paired with `second-brain-schema.md` (the type/tag/status classification model) and `decisions.md` (build order, storage routing, backup plan) — together, the three documents that describe v3.0.0 in full. A v3.0.0 install is never affected by changes to the frozen v2.0.0 tag, and vice versa.
