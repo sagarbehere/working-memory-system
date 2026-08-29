@@ -119,9 +119,15 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - records.py                -> v3 structured-records store CLI
 #       - reminders.py              -> v3 reminder store CLI (locked writer)
 #       - todoist.py                -> v3 Todoist mirror helper
+#       - reminder-check.py         -> the firing tick. Wrapped because
+#         crontab.example tells you to register a Hermes no_agent job with
+#         script=reminder-check.py, and that scheduler resolves scripts from
+#         ~/.hermes/scripts. Earlier versions never installed it there, so a
+#         hand-placed COPY could linger and run pre-fix code — bypassing the
+#         store lock and racing the agent. A wrapper cannot go stale.
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py records.py reminders.py todoist.py"
+WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py records.py reminders.py todoist.py reminder-check.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then
