@@ -23,6 +23,7 @@ TESTS = PKG / "tests"
 
 SUITES = [
     ("wmlib            ", "test_wmlib.py"),
+    ("raw log          ", "test_rawlog.py"),
     ("records store    ", "test_records.py"),
     ("reminder store   ", "test_reminders.py"),
     ("reminder tick    ", "test_reminder_check.py"),

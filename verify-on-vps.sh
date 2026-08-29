@@ -65,7 +65,7 @@ else
 fi
 
 sec "3. Every script still imports and runs --help"
-for s in wmlib.py records.py reminders.py todoist.py reminder-check.py \
+for s in wmlib.py rawlog.py records.py reminders.py todoist.py reminder-check.py \
          wm-consolidation-gate.py wm-backup-push.py cron-session-prune.py; do
   if "$PY" -c "import py_compile,sys; py_compile.compile('$PKG_DIR/$s', doraise=True)" 2>/dev/null; then
     ok "compiles: $s"
@@ -73,7 +73,7 @@ for s in wmlib.py records.py reminders.py todoist.py reminder-check.py \
     bad "compiles: $s"
   fi
 done
-for s in records.py reminders.py todoist.py; do
+for s in rawlog.py records.py reminders.py todoist.py; do
   if "$PY" "$PKG_DIR/$s" --help >/dev/null 2>&1; then ok "CLI responds: $s --help"; else bad "CLI responds: $s --help"; fi
 done
 
@@ -135,11 +135,13 @@ for p in "$HERMES_HOME/hooks/working-memory-debounce" \
 done
 echo "  wrapper scripts in $HERMES_HOME/scripts:"
 ls -1 "$HERMES_HOME/scripts" 2>/dev/null | sed 's/^/    /' || echo "    (none)"
-if ls "$HERMES_HOME/scripts/reminders.py" >/dev/null 2>&1; then
-  ok "reminders.py wrapper installed"
-else
-  skip "reminders.py wrapper not installed yet — re-run setup.sh to add it"
-fi
+for w in rawlog.py reminders.py reminder-check.py; do
+  if [ -f "$HERMES_HOME/scripts/$w" ] && grep -q "Wrapper" "$HERMES_HOME/scripts/$w" 2>/dev/null; then
+    ok "wrapper installed: $w"
+  else
+    bad "$w is missing or is a stale COPY, not a wrapper — re-run setup.sh"
+  fi
+done
 echo "  crontab lines mentioning working-memory:"
 crontab -l 2>/dev/null | grep -iE 'reminder-check|working-memory|wm-' | sed 's/^/    /' || echo "    (none)"
 

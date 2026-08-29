@@ -84,7 +84,6 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
   logs/
     2026-08.log               # one file per month — diagnostic, not memory (Section 11)
   meta/
-    tag-index.json           # tag -> list of raw entry ids, + occurrence counts
     pending-buffer.json      # unflushed per-chat message buffer (Section 11)
     lanes.json               # reserved chats (Section 2)
     reminders.lock           # flock serialising the agent and the cron tick (§9)
@@ -94,7 +93,7 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 **v3 change:** `topics/<tag>.md` flat files are left behind (see "Left behind from v2.0.0" in the decisions doc) — derived content now routes to the Obsidian vault (typed notes) and SQLite (structured records) instead. The `/working-memory/` folder keeps the raw log, `meta/`, `logs/`, and the local reminder store (§9).
 
 - Raw log files are **never edited**, only appended to. Rotate monthly.
-- `tag-index.json` lets the agent find "which raw entries mention X" without re-reading every raw file.
+- **Raw-log search is `rawlog.py search` / `recent`** — a scan over the monthly files, which is fast at personal scale. An inverted index (`meta/tag-index.json`) existed until 2026-08-29 and was **removed**: no code read or maintained it, only the agent did, so it could drift out of step with `raw/` and the only symptom was retrieval quietly missing things. Note this is NOT the canonical tag *vocabulary*, which lives at `_meta/tags.md` in the vault and is unaffected.
 - `logs/` records operational events — distinct from `raw/`, which records *content*.
 - **Everything durable lives under this single `/working-memory/` directory.** A full backup is just archiving this one folder.
 - **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (see "Backup design" in the decisions doc).
@@ -104,6 +103,16 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 ---
 
 ## 5. Raw log entry format
+
+**`rawlog.py` owns this format and is the only supported writer** (added
+2026-08-29). The layout below is the storage contract; the code enforces it.
+It previously lived only in SKILL.md, leaving the agent to reproduce a
+structured header by hand — which risks two silent failures: a malformed
+header does not match the consolidation gate's `^##\s+(\S+)`, so the entry is
+never consolidated and nothing reports it; and a hand-derived id suffix can
+collide, breaking the `raw_entry_id` links reminders and records point back
+with. Entries are delimited by the header, not by the trailing `---`, so a
+body containing its own `---` line is preserved intact.
 
 ```
 ## 2026-08-24T16:03:00+05:30 [id: 20260824-1603-01]
@@ -225,7 +234,7 @@ Questions are diverted here by the extraction pass — question items never prod
 
 **C. Vault content (project / reference / idea / narrative record)** — search the vault by title, backlink, or domain tag; exclude `status: archived` / `superseded` from default answers (surface them if explicitly asked). Reference pages look up by name (entity/concept/procedure); Projects by open status.
 
-**D. Everything else, and fallback** — the raw log is the ground truth: `tag-index.json` → current month's raw file → `raw/archive/`. Answers conversationally; the user never needs to know or guess a tag or type name.
+**D. Everything else, and fallback** — the raw log is the ground truth: `rawlog.py search --tag/--text/--type` (covering the current month and `raw/archive/`). Answers conversationally; the user never needs to know or guess a tag or type name.
 
 At this personal scale, keyword/tag search over a small file set plus a few indexed SQLite columns is sufficient — no vector DB or embedding search needed.
 

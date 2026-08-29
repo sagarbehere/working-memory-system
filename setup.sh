@@ -37,6 +37,7 @@ python3 "$PKG_DIR/records.py" --root "$WM_ROOT" init
 #    wm-backup-push.py writes separately as records-snapshot.db.
 WM_IGNORES='meta/pending-buffer.json
 meta/*.lock
+meta/tag-index.json
 logs/
 *.tmp
 records.db
@@ -116,6 +117,7 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - cron-session-prune.py     -> monthly cron-session cleanup (watchdog)
 #       - wm-backup-push.py         -> nightly backup push to the private
 #         remote (watchdog: silent when healthy, alerts on failure)
+#       - rawlog.py                 -> raw capture log CLI (owns the entry format)
 #       - records.py                -> v3 structured-records store CLI
 #       - reminders.py              -> v3 reminder store CLI (locked writer)
 #       - todoist.py                -> v3 Todoist mirror helper
@@ -127,7 +129,7 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #         store lock and racing the agent. A wrapper cannot go stale.
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py records.py reminders.py todoist.py reminder-check.py"
+WRAPPED_SCRIPTS="wm-consolidation-gate.py cron-session-prune.py wm-backup-push.py rawlog.py records.py reminders.py todoist.py reminder-check.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then

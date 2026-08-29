@@ -47,42 +47,43 @@ neither capture/question/command, and is answered normally — nothing filed.)
 
 ## Capture: raw entry first, then classify & route
 
-**Write the raw entry BEFORE anything else** — append-only, never edited:
+**Write the raw entry FIRST — one command, never by hand:**
 
 ```
-## 2026-08-28T16:03:00+05:30 [id: 20260828-1603-01]
-tags: health, vitamin-d
-type: reminder
-domain: health, vitamin-d
-supersedes: 20260817-1610-01
-
-<text>
----
+python3 ~/.hermes/scripts/rawlog.py add --text "<thought, marker stripped>" \
+  --type <reminder|record|project|reference|idea> --domain <canonical tags> \
+  [--tags …] [--status …] [--record-kind …] [--subtype …] [--file-ref …] \
+  [--supersedes <raw id>]        # see --help for the full field list
 ```
 
-- id = deterministic timestamp; `-01`, `-02`… per flush. Dedup first (check
-  current month raw + pending buffer; a duplicate re-send is NOT re-filed).
-- **`type` is the v3 classification itself** — `reminder | record | project |
-  reference | idea` (v2's `log|reminder|log+reminder` is gone: a capture with
-  a due date splits into *two items* — a `record` for the event + a `reminder`
-  for the next due, per schema §3.1's habit model).
-- `domain`: 1+ tags from the canonical list at `<vault>/_meta/tags.md`
-  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`) —
-  classify against it first; coin a new tag only when nothing fits, and add it
-  to the list in the same operation (a policy change → refinement log).
-- `status` (`active|superseded|archived`) — project/reference only, default
-  active. `record_kind: structured|narrative` — records only. `subtype:
-  entity|concept|procedure` — references only. `file_ref` when a file is
-  involved (schema §12: stable location, never a reorganizable path).
-- Classification heuristics (schema §8): due-date language → `reminder`;
-  dated/factual/no action → `record`; open question/decision → `project`;
-  "how do I"/stable entity → `reference`; musing/quote → `idea`; decision-time
-  analysis → `reference`/concept if worth rereading, else project support
-  material; puzzle → `reference` with difficulty/subject as domain tags.
+Prints `{"id": …, "duplicate": false}` — **pass that `id` as `raw_entry_id`
+when routing**; `"duplicate": true` means an identical capture landed within
+24h, so it is already filed: do not route it again. The CLI owns the format,
+the id, and dedup. Hand-writing into `raw/` risks a malformed header (the
+entry becomes invisible to consolidation, silently) or a colliding id (breaks
+the links back from reminders and records).
+
+What you must decide before calling it:
+
+- **`--type`** — `reminder | record | project | reference | idea`. A capture
+  with a due date splits into *two items*: a `record` for the event plus a
+  `reminder` for the next due (schema §3.1's habit model).
+- **`--domain`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
+  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). Classify against it first;
+  coin a new tag only when nothing fits, adding it to that list in the same
+  operation (a policy change → refinement log).
+- Type-specific: `--status` (project/reference), `--record-kind`
+  (records: `structured|narrative`), `--subtype` (references:
+  `entity|concept|procedure`), `--file-ref` (schema §12 — a stable location,
+  never a reorganizable path).
+- Heuristics (schema §8): due-date language → `reminder`; dated/factual/no
+  action → `record`; open question/decision → `project`; "how do I"/stable
+  entity → `reference`; musing/quote → `idea`; decision-time analysis →
+  `reference`/concept if worth rereading, else project support material;
+  puzzle → `reference` with difficulty/subject as domain tags.
   **Low confidence → `record`.**
 
-Then route per the table (update `meta/tag-index.json` in the same operation,
-and commit the working-memory repo after the batch):
+Then route per the table (commit the working-memory repo after the batch):
 
 | `type` | Destination | Mechanism |
 |---|---|---|
@@ -133,8 +134,10 @@ and commit the working-memory repo after the batch):
 - **Vault content** (project/reference/idea/narrative record) → search vault
   by title/backlink/domain tag. Exclude `status: archived|superseded` from
   default answers (surface if explicitly asked).
-- **Fallback / everything else** → raw log: `tag-index.json` → current month
-  raw → `raw/archive/`. Never make the user guess a tag or type.
+- **Fallback / everything else** → raw log:
+  `rawlog.py search --tag X | --text "…" | --type … [--since …]`, or
+  `rawlog.py recent`. Never read `raw/` by hand and never make the user guess
+  a tag or type.
 
 ## Command (run immediately)
 

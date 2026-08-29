@@ -32,6 +32,7 @@ private remote. Never commit data into this repo.
 
 ```
 wmlib.py                  env parsing, timezone, logging, atomic writes, locking
+rawlog.py                 the raw capture log (CLI) — owns the on-disk entry format
 records.py                SQLite store for structured records (CLI)
 reminders.py              reminder store (CLI) — owns reminders.json
 todoist.py                Todoist API client + CLI; importable as a library
@@ -44,7 +45,7 @@ hooks/working-memory-debounce/handler.py
 SKILL.md                  the agent's policy (installed as a Hermes skill)
 setup.sh / export.sh      installer / machine-to-machine migration
 verify-on-vps.sh          full verification against the live install
-tests/                    9 suites; tests/run_all.py runs them all
+tests/                    12 suites; tests/run_all.py runs them all
 ```
 
 Design docs, in the order worth reading:
@@ -53,8 +54,9 @@ Design docs, in the order worth reading:
    explains *why* captures are classified the way they are.
 2. `working-memory-system-spec-v3.md` — the plumbing: storage layout, capture
    flow, reminder scheduler, error handling.
-3. `second-brain-implementation-guide.md` — routing and backup rationale, and
-   what was deliberately dropped from v2.
+3. `second-brain-implementation-guide.md` — decisions and rejected
+   alternatives: why things are as they are, and what is absent on purpose.
+   Deliberately not a description of the system.
 
 ## Where to look, by task
 
@@ -63,6 +65,7 @@ Design docs, in the order worth reading:
 | change how a capture is classified or routed | `SKILL.md`, `second-brain-schema.md` |
 | touch reminders | `reminders.py` first, then `reminder-check.py` |
 | touch structured records | `records.py` |
+| change the raw entry format, ids, or dedup | `rawlog.py` — and the spec §5 contract |
 | change what triggers the nightly agent run | `wm-consolidation-gate.py` |
 | change capture/buffering/lanes | `hooks/working-memory-debounce/handler.py` |
 | add or change a Todoist call | `todoist.py`, then check the call budget (below) |
@@ -73,11 +76,14 @@ Design docs, in the order worth reading:
 
 These exist because breaking them caused real bugs. Each is enforced by a test.
 
-1. **Never hand-edit `reminders.json` or `records.db`.** Use `reminders.py` /
-   `records.py`. Both files have two concurrent writers (the agent and a cron
-   tick); the CLIs take `meta/reminders.lock`, and a direct edit does not. A
-   capture written without the lock is silently erased by the tick's
-   write-back.
+1. **Never hand-write `raw/`, `reminders.json`, or `records.db`.** Use
+   `rawlog.py` / `reminders.py` / `records.py`. Each closes a *silent* failure
+   mode: the reminder store has two concurrent writers (the agent and the cron
+   tick) and the CLI takes the lock a direct edit does not, so an unlocked
+   capture is erased by the tick's write-back; a malformed raw header makes an
+   entry invisible to consolidation forever; a colliding raw id breaks the
+   `raw_entry_id` links back from reminders and records. None of these report
+   anything when they go wrong.
 2. **The live `records.db` is never copied, moved, or replaced.** It is
    WAL-mode. The committed artifact is `records-snapshot.db`, produced by
    SQLite's backup API while the live file is only read. Replacing the file
