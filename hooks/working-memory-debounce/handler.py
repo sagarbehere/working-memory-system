@@ -17,8 +17,8 @@ Three inputs qualify as working-memory input:
      goes out through the platform-correct send path.
   2. A reserved lane — a chat previously reserved in-band (or the legacy
      env-var lane) where the marker is implied.
-  3. A marker — a message starting with ``Hey memory`` or ``note``
-     (case-insensitive, word-boundary).
+  3. A marker — a message starting with ``Hey memory`` (case-insensitive,
+     word-boundary).
 
 Markers and lane messages are buffered with a single debounce
 (``WM_DEBOUNCE_SECONDS``, default 5s) before being flushed as ONE agent
@@ -114,10 +114,17 @@ WM_SKILL = (os.environ.get("WM_SKILL") or WM_ENV.get("WM_SKILL", "working-memory
 PENDING_FILE = WM_ROOT / "meta" / "pending-buffer.json"
 LANES_FILE = WM_ROOT / "meta" / "lanes.json"
 
-# Markers — primary + short alias. Matched case-insensitively at message
-# start, followed by whitespace / punctuation / end (word boundary, so
-# "notebook" never matches "note"). See spec: Scope boundary.
-MARKERS = ("hey memory", "note")
+# The marker. Matched case-insensitively at message start, followed by
+# whitespace / punctuation / end (word boundary, so "hey memories" does not
+# match). See spec: Scope boundary.
+#
+# There used to be a short alias, ``note``. It was removed on 2026-08-29
+# because it is an ordinary English sentence-opener: "Note that the deadline
+# moved", "Note the difference", "Note: I disagree" were all silently filed as
+# captures. A marker must be something nobody types by accident, and
+# "Hey memory" is. The cost — four more characters — falls only on capture
+# from an unreserved chat, since a reserved lane needs no marker at all.
+MARKERS = ("hey memory",)
 # Reservation phrases — exactly two, symmetric, dictionary words
 # ("release" is the spellchecker-clean pair for "reserve").
 # Case-insensitive; trailing words tolerated ("release for memory please").
@@ -233,8 +240,7 @@ def _parse_marker(text) -> "str | None":
 
     Word-boundary rule: the marker must be followed by whitespace,
     punctuation, or end-of-message. Hyphen and underscore count as word
-    characters, not punctuation — otherwise "note-taking is hard" and
-    "note_to_self: ..." were both captured as memory input.
+    characters, not punctuation, so a hyphenated continuation does not match.
     """
     if not text:
         return None
@@ -249,7 +255,18 @@ def _parse_marker(text) -> "str | None":
 
 def _reservation_action(text) -> "str | None":
     """Return 'reserve' / 'release' when the message is a reservation
-    phrase (exact or with trailing words), else None."""
+    phrase (exact, or followed by more words), else None.
+
+    The phrase may be followed by whitespace OR punctuation: only a trailing
+    space used to count, so "Release for memory, thanks" — a natural way to
+    type it — silently did nothing.
+
+    Trailing words are tolerated deliberately ("reserve for memory please"),
+    which means a sentence *about* the phrase ("reserve for memory is what you
+    say") also triggers it. That false positive is accepted: it is rare, and
+    it is undone by one message. Requiring an exact match would trade it for a
+    more common annoyance.
+    """
     if not text:
         return None
     low = text.strip().lower()
@@ -257,7 +274,10 @@ def _reservation_action(text) -> "str | None":
         (RESERVE_PHRASE, "reserve"),
         (RELEASE_PHRASE, "release"),
     ):
-        if low == phrase or low.startswith(phrase + " "):
+        if low == phrase:
+            return action
+        nxt = low[len(phrase):len(phrase) + 1] if low.startswith(phrase) else ""
+        if nxt and not (nxt.isalnum() or nxt in "-_"):
             return action
     return None
 

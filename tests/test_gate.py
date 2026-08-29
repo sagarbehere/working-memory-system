@@ -29,14 +29,11 @@ def check(cond, label):
     passed += 1
 
 # --- markers (word-boundary, case-insensitive) ---
-check(handler._parse_marker("note printer arrived") == "note", "note + space")
-check(handler._parse_marker("Note: printer") == "note", "Note: case + colon")
 check(handler._parse_marker("notebook arrived") is None, "notebook no-match")
 check(handler._parse_marker("Hey memory, vitamin D") == "hey memory", "Hey memory + comma")
 check(handler._parse_marker("hey memory") == "hey memory", "exact hey memory")
 check(handler._parse_marker("HEY MEMORY what's due") == "hey memory", "upper case")
 check(handler._parse_marker("notes app") is None, "notes no-match")
-check(handler._parse_marker("note") == "note", "bare note")
 check(handler._parse_marker("") is None, "empty")
 check(handler._parse_marker(None) is None, "None")
 

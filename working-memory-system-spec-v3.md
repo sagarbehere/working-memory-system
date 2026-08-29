@@ -31,11 +31,11 @@ Capture works identically on every client — Telegram, a web UI (via the api_se
 
 Working-memory input is defined by a deterministic **message marker**, not by guessing intent on every message the user sends Hermes — this avoids misfiring on ordinary conversation (e.g. "remind me to bring this up with the team" as a passing remark, not a capture instruction).
 
-**The marker:** two forms, matched case-insensitively at message start, word-boundary rule (so "notebook" never matches "note"):
-- **Primary:** `Hey memory` — explicit, natural to dictate.
-- **Short alias:** `note` — fast to type or dictate, no punctuation.
+**The marker:** `Hey memory`, matched case-insensitively at message start with a word-boundary rule (so "hey memories" never matches). Explicit, natural to dictate, and — the point — something nobody types by accident.
 
-A message starting with either marker is working-memory input, from any client. The marker is left in the text through the capture gate; the extraction pass strips it before writing, so it's never filed as part of an entry.
+A short alias `note` existed until 2026-08-29 and was **removed**: it is an ordinary English sentence-opener, so "Note that the deadline moved", "Note the difference between these", and "Note: I disagree" were all silently filed as captures. A marker's whole job is to be unambiguous; a common word cannot do it. The extra characters cost nothing in practice, because the primary capture surface is a reserved lane where no marker is needed at all.
+
+A message starting with the marker is working-memory input, from any client. The marker is left in the text through the capture gate; the extraction pass strips it before writing, so it's never filed as part of an entry.
 
 **Reserved lanes (optional convenience, not required):** a chat can be reserved for working-memory input with an in-chat phrase (`reserve for memory` / `release for memory`), after which every message in that chat is treated as working-memory input with no marker needed — zero-friction for a primary capture surface. This is stored in `meta/lanes.json`, self-populating from the in-chat declaration, git-backed alongside the rest of the data. Multiple chats, on any platform, can be reserved simultaneously. A reserved chat is a convenience, not a dependency: if it's ever deleted, capture and reminders both degrade gracefully to marker mode and origin/home-channel delivery (Section 9) — nothing breaks, and re-reserving the recreated chat is one phrase.
 

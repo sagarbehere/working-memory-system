@@ -73,7 +73,7 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "     Values on the SOURCE machine were:"
     grep -E '^(WM_|#)' "$HERMES_HOME/working-memory.env" 2>/dev/null | sed 's/^/       /' || true
     echo "     Capture is marker-first: capture works ANYWHERE by"
-    echo "     starting a message with 'Hey memory' or 'note' — the env vars"
+    echo "     starting a message with 'Hey memory' — the env vars"
     echo "     are only a LEGACY seed for a frictionless lane and can be left"
     echo "     empty. To reserve a chat as a lane instead, say 'reserve for"
     echo "     memory' in it (release with 'release for memory')."

@@ -12,6 +12,10 @@ stub would happily satisfy. Run that one on the VPS; verify-on-vps.sh does.
 
 Every suite writes to its own temporary directory. Nothing here touches a
 real WM_ROOT, and nothing makes a network call.
+
+This covers the DETERMINISTIC layer only. Whether the agent then classifies
+and files a capture sensibly is an LLM judgment — see tests/scenarios.md,
+a hand-run checklist.
 """
 import os
 import pathlib
@@ -26,6 +30,7 @@ SUITES = [
     ("raw transcript   ", "test_rawlog.py"),
     ("todoist budget   ", "test_todoist_budget.py"),
     ("capture gate     ", "test_gate.py"),
+    ("gate cases       ", "test_gate_cases.py"),
     ("gate health      ", "test_gate_health.py"),
     ("backup push      ", "test_backup.py"),
     ("debounce hook    ", "test_debounce.py"),

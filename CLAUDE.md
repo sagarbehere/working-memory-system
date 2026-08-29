@@ -42,7 +42,7 @@ hooks/working-memory-debounce/handler.py
 SKILL.md                  the agent's policy (installed as a Hermes skill)
 setup.sh / export.sh      installer / machine-to-machine migration
 verify-on-vps.sh          full verification against the live install
-tests/                    8 suites; tests/run_all.py runs them all
+tests/                    9 suites; tests/run_all.py runs them all
 ```
 
 Design docs, in the order worth reading:
@@ -144,6 +144,18 @@ purpose — it asserts against the *real* gateway classes, which a stub would
 satisfy, so it only means something on the VPS.
 
 Every suite uses temporary directories. **No test may touch a real `WM_ROOT`.**
+
+Two things the suite deliberately does not cover, and where they live instead:
+
+- **"Is this message memory input?"** — `tests/gate-cases.txt`, one line per
+  real phrasing (`<expected> | <message>`). Adding a case is one line; that is
+  the point. It found a real bug on its first run.
+- **"Did the agent file it sensibly?"** — `tests/scenarios.md`, a hand-run
+  checklist. This is an LLM judgment and there is no cheap deterministic test
+  for it. **When the agent gets something wrong, prefer a constraint in a CLI
+  over a test**: a test tells you it was wrong last Tuesday, a validation
+  stops it being wrong at all. That is why `rawlog.py` owns the entry format
+  rather than `SKILL.md` describing it.
 
 ## Development workflow
 

@@ -1,0 +1,65 @@
+# Capture-gate cases: does the system treat this message as memory input?
+#
+# ONE LINE PER CASE:   <expected> | <message>
+#
+#   capture  the gate buffers it as working-memory input
+#   ignore   it falls through as ordinary conversation, untouched
+#   reserve  it reserves this chat as a lane
+#   release  it releases the lane
+#
+# Cases here are evaluated OUTSIDE a reserved lane. In a reserved lane every
+# message is capture input and the marker is irrelevant — that is covered
+# separately in test_gate.py.
+#
+# WHEN THE SYSTEM SURPRISES YOU: add the message here with what you expected,
+# and run `python3 tests/run_all.py`. If it fails, the gate disagrees with you
+# and that is the bug. If it passes, the gate was right and the surprise came
+# from the agent's judgment instead — see tests/scenarios.md.
+#
+# Lines starting with # are comments; blank lines are ignored.
+
+# --- the marker, in the shapes it actually gets typed ---
+capture | Hey memory buy stamps on the way home
+capture | hey memory buy stamps
+capture | HEY MEMORY buy stamps
+capture | Hey memory, remind me Tuesday at 8am to call the plumber
+capture | Hey memory: printer is out of ink
+capture | Hey memory what did I decide about the printer?
+capture | Hey memory
+capture | Hey memory   BP 128/82 this morning
+
+# --- near misses that must NOT be captured ---
+ignore | hey memories are strange things
+ignore | Hey memorial service is on Friday
+ignore | I said hey memory but not at the start
+ignore | Talk to me about my memory system
+
+# --- 'note' was a marker until 2026-08-29; it is ordinary text now ---
+# Removed because these are all normal English and were being filed silently.
+ignore | note buy milk
+ignore | Note that the deadline moved to Friday
+ignore | Note the difference between these two approaches
+ignore | Note: I disagree with that plan
+ignore | note down whatever you think is best
+ignore | note-taking is hard
+ignore | note_to_self: buy milk
+ignore | notebook shopping list
+
+# --- ordinary conversation with Hermes, none of which is a capture ---
+ignore | what's the weather tomorrow
+ignore | can you summarise this article for me
+ignore | remind me to call the plumber
+ignore | thanks, that worked
+ignore |
+
+# --- lane reservation ---
+reserve | reserve for memory
+reserve | Reserve for memory please
+release | release for memory
+release | Release for memory, thanks
+ignore  | I want to reserve a table for dinner
+ignore  | I would reserve for memory but not here
+# ACCEPTED FALSE POSITIVE: trailing words are tolerated on purpose, so a
+# sentence *about* the phrase also reserves the lane. Rare, and undone by one
+# message; requiring an exact match would break "reserve for memory please".
+reserve | reserve for memory is the phrase you use

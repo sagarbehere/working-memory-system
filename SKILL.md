@@ -1,6 +1,6 @@
 ---
 name: working-memory
-description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'/'note'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
+description: "Use for the working-memory system v3 (second brain): input in a reserved lane or starting with 'Hey memory'. Classify each capture (reminder/record/project/reference/idea), route to the vault or Todoist, retrieve, and set reminders."
 version: 3.0.0
 author: Sagar Behere
 license: MIT
@@ -29,7 +29,7 @@ rationale), `working-memory-system-spec-v3.md` (capture plumbing), then
 
 Working-memory input is any message that (a) arrives in a **reserved lane**
 (`meta/lanes.json`, or the legacy env lane), or (b) starts with a marker:
-`Hey memory` or `note` (case-insensitive, word boundary). The capture-gate
+`Hey memory` (case-insensitive, word boundary). The capture-gate
 hook already buffered and stamped it; **strip the marker token before filing**.
 Everything else is ordinary conversation — answer normally, file nothing.
 (In a reserved lane, chit-chat reaches the extraction pass, classifies as
