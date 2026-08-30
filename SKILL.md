@@ -67,9 +67,10 @@ Then classify the item and route it:
 - **`type`** — `reminder | record | project | reference | idea`. A capture
   with a due date splits into *two items*: a `record` for the event plus a
   `reminder` for the next due (schema §3.1's habit model).
-- **`domain`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
-  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). Classify against it first
-  and prefer the closest existing tag. When genuinely nothing fits, coin one:
+- **`tags`** — 1+ tags from the canonical list at `<vault>/_meta/tags.md`
+  (`<vault>` = `WM_VAULT_PATH`, default `~/wiki`). The field is `tags:`,
+  Obsidian's built-in tag property; every value is a plain string. Classify
+  against the list first and prefer the closest existing tag. When genuinely nothing fits, coin one:
   add it to the list in the same operation and **tell the user you did** —
   this is do-then-inform (schema §6), not something to wait on. They can veto,
   and then the tag comes back out and the entry is re-tagged.
@@ -95,7 +96,7 @@ Then classify the item and route it:
 - These notes **ARE ordinary wiki pages**: add an index.md entry under the
   page's type section and a log.md line, follow the vault's own frontmatter
   conventions, and link related notes when it is natural (no quota).
-- Frontmatter: `type`, `domain`, `status` (where applicable), `subtype`
+- Frontmatter: `type`, `tags`, `status` (where applicable), `subtype`
   (references), `created`/`updated`.
 - **Commit AND push in the vault (`WM_VAULT_PATH`, default `~/wiki`) after every write** — a local-only commit in a
   sync repo isn't backed up.

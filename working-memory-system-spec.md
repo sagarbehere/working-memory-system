@@ -147,7 +147,7 @@ system.
 | Undated task | Todoist **or** a `## Checklist` line in the relevant project note — one home, never both | Quick errand → Todoist only; project-scoped to-do → the project note. |
 | Artifact | stays where it already syncs; a Record carries `file_ref` | Per schema §9: a stable location, never a reorganizable path. |
 
-Vault notes carry `type`, `domain`, `status` (where applicable), `subtype`
+Vault notes carry `type`, `tags`, `status` (where applicable), `subtype`
 (references), and `created`/`updated` in frontmatter. Every vault write is
 committed **and pushed** — a local-only commit in a syncing repo is not backed
 up.
