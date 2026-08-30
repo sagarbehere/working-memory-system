@@ -81,8 +81,6 @@ WM_ROOT_LIVE="$("$PY" -c "import sys; sys.path.insert(0,'$PKG_DIR'); import wmli
 printf '  resolved WM_ROOT: %s\n' "$WM_ROOT_LIVE"
 if [ -d "$WM_ROOT_LIVE" ]; then
   ok "WM_ROOT exists"
-  printf '  reminders.json  : %s entries\n' \
-    "$("$PY" -c "import json;print(len(json.load(open('$WM_ROOT_LIVE/reminders.json'))))" 2>/dev/null || echo '(unreadable/absent)')"
   printf '  raw files       : %s\n' "$(ls -1 "$WM_ROOT_LIVE/raw"/*.md 2>/dev/null | wc -l)"
   printf '  git status      : %s uncommitted file(s)\n' "$(git -C "$WM_ROOT_LIVE" status --porcelain 2>/dev/null | wc -l)"
 

@@ -98,13 +98,30 @@ def sections_in(doc):
     return out
 
 
+SPEC = DOC_FOR["spec"]
+
+# "spec §9" and "spec Section 9" are the same pointer written two ways. The
+# first version of this check knew only about "§", which is exactly why the
+# prose form was free to rot: setup.sh cited three sections and two of them
+# were wrong, in a file the guard was already scanning.
+_REF = r"(?:§\s*|Section\s+)(\d+(?:\.\d+)?)"
+
+
 def check_section_refs():
-    """Cross-doc '§N' pointers must resolve.
+    """Cross-doc and in-doc section pointers must resolve.
 
     Renumbering a document silently invalidates every reference into it from
     everywhere else, and nothing complains — a reader just follows a pointer
     to the wrong section. Found four such breaks the first time this ran,
-    after the schema was split.
+    after the schema was split, and five more once it learned the prose form.
+
+    NOT CHECKED HERE, deliberately: prose descriptions of deleted features
+    ("the nightly consolidation gate"). Those were tried and abandoned as a
+    token rule — after the cut, nearly every surviving mention of a deleted
+    feature is a *negation* ("there is no local reminder store") or a note
+    explaining where its one useful job went. A guard that fires on fifteen
+    correct lines to catch one wrong one gets suppressed, and then it is
+    protecting nothing. Prose staleness stays a review job.
     """
     known = {k: sections_in(v) for k, v in DOC_FOR.items()}
     bad = []
@@ -117,9 +134,14 @@ def check_section_refs():
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             for word, doc in DOC_FOR.items():
-                for num in re.findall(word + r"\s+§(\d+(?:\.\d+)?)", line):
+                for num in re.findall(word + r"\s+" + _REF, line):
                     if num not in known[word]:
                         bad.append((rel, lineno, f"{word} §{num}", doc))
+            # Inside the spec, a bare "(Section N)" is a self-reference.
+            if rel == SPEC:
+                for num in re.findall(r"\(Section\s+(\d+(?:\.\d+)?)", line):
+                    if num not in known["spec"]:
+                        bad.append((rel, lineno, f"Section {num}", SPEC))
     if bad:
         print(f"{len(bad)} broken section reference(s):\n")
         for rel, lineno, ref, doc in bad:

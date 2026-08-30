@@ -1,6 +1,6 @@
 # Working Memory System — Implementation Spec
 
-**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. This copy describes **v3.0.0**, forked from the frozen **v2.0.0** tag and evolving independently in its own branch — see the versioning note at the end of this document. For type/tag/status classification, see `second-brain-schema.md`. For build, storage-routing, and backup mechanics, see `decisions.md`.
+**Document map:** this file covers *capture, debounce, reminder-delivery, and crash-recovery* — the working-memory-system plumbing. This copy describes **v4.0.0** — see the versioning note at the end of this document. For type/tag/status classification, see `second-brain-schema.md`. For build, storage-routing, and backup mechanics, see `decisions.md`.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ Capture works identically on every client — Telegram, a web UI (via the api_se
 2. **Extraction/tagging pass** — LLM call that reads a flushed buffer, splits it into items, classifies each as capture or question, and for captures produces: freeform tags, entry type, and (if applicable) a reminder directive and/or supersession flag.
 3. **Raw log** — append-only, immutable, timestamped. Ground truth.
 4. **Typed destinations** — the Obsidian vault (project/reference/idea/record notes) and Todoist (reminders and errands). Derived and regenerable; not authoritative. *(v3 replaced v2's flat `topics/<tag>.md` files with vault notes — see §4.)*
-5. **Promotion/consolidation pass** — background job that routes recurring or important captures into typed notes and periodically condenses the reference-flavoured ones. Gated by `wm-consolidation-gate.py`, which stays silent when there is no work.
+5. **Promotion** — happens inline, at capture time: the agent routes a capture straight to its typed destination (§5a). There is no background pass and no scheduled job; the nightly gate that used to run one was removed in the 2026-08-29 cut (§8, `decisions.md`).
 6. **Reminders** — created directly in Todoist, which notifies every device (§9). Nothing fires from this machine.
 7. **Retrieval handler** — answers a question by searching the right store (§12), not by the user browsing anything.
 8. **Deterministic layer** — `wmlib.py` (env, timezone, logging, locking), `rawlog.py`, and `todoist.py`. The agent calls tools; it never hand-writes `raw/`.
@@ -51,21 +51,21 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 
 - The capture gate (Section 6, step 2/3) — marker/lane detection and `auto_skill` stamping, on the base adapter's inbound seam so it works identically across platforms. A single small gate, not a registry.
 - The debounce buffer (Section 6) — an exact timer that fires N seconds after the last message with no intervening one.
-- The reminder scheduler (Section 9) — firing a message at a specific `due_at`, delivered to the capture's origin chat with a home-channel fallback. Uses the VPS's existing cron, not a new scheduler process.
+- The Todoist client (Section 9) — creating the task and reading back what is due. Todoist owns firing and delivery; nothing here schedules or fires anything.
 - Persisting `meta/pending-buffer.json` on every buffered message (Section 11), so a crash doesn't silently drop an in-progress thought.
 - Basic file read/write/append/list operations over `/working-memory/`.
 
 **Leave to the agent's own judgment, guided by a written policy — not hardcoded rules:**
 
 - Splitting a flushed buffer into items, classifying each as capture/question/command, choosing tags, detecting supersession (Section 7).
-- Consolidation/condensation wording, deciding when to split or merge topic files (Section 8).
+- Choosing a capture's destination and wording the note it becomes (Sections 5a, 8).
 - Answering retrieval questions (Section 12).
 
-**How this is wired together:** Hermes gets a skill document (distilled from this spec) plus generic file read/write/list tools, and decides tagging, filing, and consolidation itself each time it's invoked. The capture gate invokes Hermes with the flushed buffer and relevant context (tag list, candidate topic-file excerpts) when it's time to process something; the cron-fired reminder script handles what Hermes shouldn't be trusted to act on purely by its own initiative.
+**How this is wired together:** Hermes gets a skill document (distilled from this spec) plus generic file read/write/list tools and the CLIs in this package, and decides tagging, filing, and routing itself each time it's invoked. The capture gate invokes Hermes with the flushed buffer and relevant context (the vault's `SCHEMA.md`, candidate note excerpts) when it's time to process something. The agent is alive only while the user is talking to it: nothing invokes it on a schedule.
 
 **Escalation path for edge cases:** SKILL.md is terse by design (Section 16) — it won't spell out every judgment call. It ends with a pointer to three things, each answering a different kind of question: this spec's file path (**why** the system works this way), the implementation source location (**how** it currently works), and `logs/` (**what actually happened** on a specific past run — e.g. "why didn't my reminder fire yesterday" needs logs, not the spec or code). This is a lookup capability, not genuine introspection — Hermes decides *whether* to escalate based on its own in-the-moment judgment of "does this look covered," which is inherently imperfect, but the pointer at least makes the right behavior available and instructed.
 
-**Net shape:** a capture gate on the shared adapter seam, a small cron-fired reminder script, and one skill document for the judgment layer — all reusing infrastructure that already runs, with a documented escalation path back to this spec, the source, and the logs.
+**Net shape:** a capture gate on the shared adapter seam, three small CLIs (`wmlib`, `rawlog`, `todoist`), one nightly backup watchdog, and one skill document for the judgment layer — all reusing infrastructure that already runs, with a documented escalation path back to this spec, the source, and the logs.
 
 ---
 
@@ -158,11 +158,11 @@ up.
 
 1. Message arrives on any connected client.
 2. The capture gate checks: does it start with the marker, or is this chat in a reserved lane? If neither, it's ordinary conversation — untouched, falls through with no effect. If either, `auto_skill: working-memory` is set and the message is buffered.
-3. **Buffer, don't process immediately.** A debounce timer (default ~5s for marker input, ~25s for a reserved lane, both tunable) resets on every new buffered message. Only when the timer elapses does the buffer flush: messages concatenated in order into one logical input. A lone `.` or `/done` flushes immediately.
+3. **Buffer, don't process immediately.** A single debounce timer (`WM_DEBOUNCE_SECONDS`, default 5s) resets on every new buffered message. The same timer applies to marker input and reserved lanes alike — a longer lane timer was specified once and never built, and the idea was abandoned (see `handler.py`'s docstring). Only when the timer elapses does the buffer flush: messages concatenated in order into one logical input. A lone `.` or `/done` flushes immediately.
 4. Once flushed, the extraction pass (Section 7) runs against the flushed buffer, returning items classified `capture`, `question`, or `command`.
-5. Question items go to the retrieval handler (Section 12); command items go to the consolidation pass (Section 8). Neither becomes a raw log entry.
+5. Question items go to the retrieval handler (Section 12); command items are executed immediately (Section 8). Neither becomes a raw log entry.
 6. Capture items are written as raw log entries (Section 5), tags/type/reminder already resolved by the same extraction call.
-7. Any reminder directive updates the local reminder store and mirrors to Todoist (Section 9).
+7. Any reminder directive creates a Todoist task (Section 9). There is no local reminder store.
 8. A brief confirmation is sent back once processed ("logged 2 items: health/vitamin-d, printer"), especially useful early on (Section 13).
 
 ---
@@ -184,7 +184,7 @@ This pass does routing (capture/question/command) and, for captures, classificat
 - **Habit captures split** per schema §3.1: "took vitamin D, next due Friday" →
   two items — a `record` (the completion) + a `reminder` (the next due).
 - Classification heuristics: the structural cues from `second-brain-schema.md` §8 (due-date language → reminder; dated/factual/no action → record; open question/decision → project; "how do I"/stable entity → reference; musing/quote → idea). **Low confidence defaults to `record`** — cheapest to fix later, nothing silently lost.
-- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these notes," "forget X") — handed to consolidation (Section 8), never producing a transcript entry. Corrections touch whichever destination the original item was routed to (a vault note or a Todoist task) — same confirm-before-destructive rule. The transcript itself is never edited.
+- `command` items are administrative/corrective instructions ("that's mis-filed," "merge these notes," "forget X") — executed immediately (Section 8), never producing a transcript entry. Corrections touch whichever destination the original item was routed to (a vault note or a Todoist task) — same confirm-before-destructive rule. The transcript itself is never edited.
 - Splitting is conservative — one coherent thought touching two tags stays one entry; split only for genuinely unrelated content.
 - One LLM call per flushed buffer, kept cheap and fast.
 
@@ -192,17 +192,18 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 ## 8. Promotion & consolidation policy
 
-**Promotion (v3):** recurring or important captures graduate into the vault as typed notes at routing time (§5a is canonical for routing) instead of `topics/<tag>.md` files — the flat topic files are left behind in v2.0.0. The raw log remains the ground truth from which any note can be regenerated.
+**Promotion happens at capture time.** A capture is routed straight to its typed destination (§5a is canonical) — there is no staging period and nothing graduates later. The raw log remains the ground truth from which any note can be regenerated.
 
-**Consolidation (v3):** runs on a schedule or size threshold:
-- Reference-flavored content (procedures, entity pages) can be condensed like the old topic files — it's derived and regenerable.
+**Consolidation is not a job.** The nightly pass was removed in the 2026-08-29 cut: it cost tokens every night to report work the agent had already done inline at capture time. What survives is tidying the agent does while it is already editing a note:
+
+- Reference-flavoured content (procedures, entity pages) can be condensed when it grows unwieldy — it's derived and regenerable.
 - Series notes (BP, headaches) stay itemized and are never collapsed — a measurement history is the point, and summarising destroys it.
-- Supersession: a newer fact replaces the older line (`supersedes`); `status: superseded` on vault notes suppresses them from default answers.
+- Supersession: a newer fact replaces the older line; `status: superseded` on vault notes suppresses them from default answers.
 - Expired lines drop (resolved reminders, "due in a week" facts); the raw entry itself is untouched.
 
 Fully reversible — derived content regenerates from the raw log, so "that's mis-filed" or "split/merge these" just triggers a regeneration.
 
-**Handling `command` items:** run immediately, not on the next scheduled pass. "Forget entirely" strikes the underlying raw entry's content too (the one justified exception to "raw log is never edited") and removes or deprecates the derived artifacts — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
+**Handling `command` items:** run immediately — there is no later pass to defer to. "Forget entirely" strikes the underlying raw entry's content too (the one justified exception to "raw log is never edited") and removes or deprecates the derived artifacts — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
 
 ---
 
@@ -235,10 +236,10 @@ calls a day. Todoist's own reliability comfortably exceeds that.
 
 ## 10. Cleanup & aging
 
-1. **Raw log rotation** — files older than ~60-90 days move to `raw/archive/`, still grep-able.
+1. **Raw log archive** — `raw/archive/` exists and `rawlog.py` reads it, so an archived month stays searchable. Nothing rotates into it automatically: monthly transcript files are small, and an automatic mover touching the one append-only audit trail is a bad trade. Move a file by hand if it ever matters.
 2. **Expiry** — time-bound lines (resolved reminders, "due in a week" facts) drop from derived notes once resolved; the raw entry itself is untouched.
 3. **Supersession** — new fact replaces old rather than accumulating (Section 8).
-4. **Size-triggered condensation** — a derived note (Reference-flavored) past ~2-3KB gets a full condense-and-rewrite on its next write.
+4. **Size-triggered condensation** — a reference-flavoured note that has grown unwieldy gets condensed on its next write. The vault's `SCHEMA.md` carries the threshold (~200 lines) and the series-note exemption; it is the authority, not this line.
 5. **Log rotation** — `logs/` deleted (not archived) after ~30 days; shorter retention than the raw log, since it's diagnostic, not memory.
 
 ---
@@ -278,8 +279,8 @@ For the first few weeks, briefly confirm what got filed after each processed buf
 
 ## 14. Open items for the implementer
 
-- Exact thresholds (promotion occurrence count, condensation size, raw log rotation window, debounce duration) are starting guesses — tune based on real usage.
-- **Off-box backup** for `/working-memory/` is unresolved at this layer by default (Section 4) — decide separately whether it's worth covering for this v2.0.0 install.
+- Debounce duration (`WM_DEBOUNCE_SECONDS`, default 5s) is a starting guess — tune based on real usage.
+- **Off-box backup — resolved.** `wm-backup-push.py` commits and pushes `WM_ROOT` to a private remote nightly, exports open Todoist tasks alongside it, and doubles as the health watchdog. See `decisions.md`, "Backup design".
 
 ---
 
@@ -297,7 +298,7 @@ For the first few weeks, briefly confirm what got filed after each processed buf
 
 Each person runs their own copy against their own Hermes instance — single-user per install. The package contains:
 
-- **`SKILL.md`** — the distilled operational policy: tag format, routing rules, splitting/supersession heuristics, topic file format, consolidation behavior. Terse and rule-based, ending with a pointer to this spec, the implementation source, and `logs/`.
+- **`SKILL.md`** — the distilled operational policy: what counts as capture input, routing rules, splitting/supersession heuristics, confirmation shapes. Terse and rule-based, deferring the vault's own rules to its `SCHEMA.md`, and ending with a pointer to this spec, the implementation source, and `logs/`.
 - **The capture gate** — hooks into the base adapter's inbound seam of the user's own already-running Hermes instance.
 - **`todoist.py`** — the Todoist client through which all reminders are created and queried.
 - **`crontab.example`** — the exact line(s) to add.

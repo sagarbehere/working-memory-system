@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Working-memory system installer (spec Section 15: setup.sh).
+# Working-memory system installer (spec Section 16: Packaging).
 #
 # Creates the data skeleton, initializes the backup git repo, installs the
 # skill + debounce hook, and writes the runtime env file (never overwrites).
@@ -15,12 +15,13 @@ echo "Package: $PKG_DIR"
 echo "Data:    $WM_ROOT"
 echo "Hermes:  $HERMES_HOME"
 
-# 1. Data skeleton (spec Section 3/4)
+# 1. Data skeleton (spec Section 4: Storage layout)
 mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/meta" "$WM_ROOT/logs"
 if [ ! -f "$WM_ROOT/meta/lanes.json" ]; then
   echo "{}" > "$WM_ROOT/meta/lanes.json"
 fi
-# 2. Backup git repo (spec Section 3) — repo-local identity, no global config.
+# 2. Backup git repo (spec Section 4; decisions.md "Backup design") —
+#    repo-local identity, no global config.
 #    FRESH install: init + initial commit so the audit trail starts.
 #    ESTABLISHED repo: identity config only, NEVER commit — pending changes
 #    belong to whoever made them (capture pipeline, agent edits); a catch-all

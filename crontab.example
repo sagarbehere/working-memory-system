@@ -9,6 +9,7 @@
 #
 #     crontab -e      # then delete the line mentioning reminder-check.py
 #
-# The remaining scheduled work is registered inside Hermes, not the OS
-# crontab: the nightly consolidation gate, the nightly backup push, and the
-# monthly cron-session prune. See README / setup.sh output.
+# The only remaining scheduled work is registered inside Hermes, not the OS
+# crontab: exactly one job, the nightly backup push (a plain-Python watchdog,
+# silent when healthy). Nothing schedules the agent. See README / setup.sh
+# output.
