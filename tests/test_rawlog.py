@@ -166,6 +166,36 @@ def test_concurrent_appends():
           f"8 concurrent writers -> 8 entries (got {len(rawlog.read_entries(root))})")
 
 
+def test_append_only():
+    """The CLI must offer no way to remove or rewrite an entry.
+
+    This is the rule the whole design rests on: the vault's git history records
+    what was *filed*, but only the transcript records what the user actually
+    *said*, which is what makes an agent misclassification recoverable rather
+    than silent permanent loss.
+
+    It is guarded here rather than left to prose because prose already got it
+    wrong once — spec §8 carved out "forget entirely" as a justified exception
+    and described the CLI striking an entry's content, a capability that never
+    existed. A doc can drift; a subcommand cannot appear by accident. If this
+    test fails because someone added `redact`, that is the moment to argue the
+    policy, not to update the assertion.
+    """
+    out = subprocess.run([sys.executable, str(PKG / "rawlog.py"), "--help"],
+                         capture_output=True, text=True)
+    for verb in ("delete", "remove", "redact", "strike", "edit", "rewrite",
+                 "forget", "purge"):
+        check(verb not in out.stdout.lower(),
+              f"rawlog CLI offers no '{verb}' subcommand")
+
+    # And the module-level API is equally free of one — a subcommand is not the
+    # only way in; the agent can import this.
+    for attr in dir(rawlog):
+        check(not any(v in attr.lower() for v in
+                      ("delete", "remove", "redact", "strike", "purge")),
+              f"rawlog exposes no destructive helper (found {attr!r})")
+
+
 def main():
     test_format()
     test_every_entry_is_readable()
@@ -175,6 +205,7 @@ def main():
     test_reads_older_entries()
     test_cli()
     test_concurrent_appends()
+    test_append_only()
     print(f"ALL RAWLOG TESTS PASSED ({checks} checks)")
 
 

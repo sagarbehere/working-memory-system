@@ -203,7 +203,17 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 Fully reversible — derived content regenerates from the raw log, so "that's mis-filed" or "split/merge these" just triggers a regeneration.
 
-**Handling `command` items:** run immediately — there is no later pass to defer to. "Forget entirely" strikes the underlying raw entry's content too (the one justified exception to "raw log is never edited") and removes or deprecates the derived artifacts — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
+**Handling `command` items:** run immediately — there is no later pass to defer to. "Forget entirely" removes or deprecates the *derived* artifacts (the vault note, the Todoist task) — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
+
+**It does not touch the transcript.** An earlier draft of this section carved
+out "forget entirely" as the one justified exception to "the raw log is never
+edited". That exception was wrong and is withdrawn. The transcript is the only
+record of what the user actually *said*, as opposed to what the agent decided
+to file; it is what makes a misclassification recoverable instead of silent
+permanent loss (§5, `decisions.md`). Striking it destroys exactly the thing
+that makes the rest of the system safe to get wrong. `rawlog.py` accordingly
+has no command that can do it — only `add` and `search` — so the agent must
+say plainly that the words remain rather than appear to erase them.
 
 ---
 

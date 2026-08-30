@@ -218,7 +218,7 @@ it does say is a real problem: a failed push, an unpushed vault commit, or
 something that has been failing quietly.
 
 ```bash
-python3 tests/run_all.py    # 8 suites, no network, no live data touched
+python3 tests/run_all.py    # no network, no live data touched
 ```
 
 ---
