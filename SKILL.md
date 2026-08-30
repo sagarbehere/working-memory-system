@@ -93,13 +93,22 @@ Then classify the item and route it:
 | **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body |
 
 **Vault write discipline (all vault destinations):**
-- These notes **ARE ordinary wiki pages**: add an index.md entry under the
-  page's type section and a log.md line, follow the vault's own frontmatter
-  conventions, and link related notes when it is natural (no quota).
-- Frontmatter: `type`, `tags`, `status` (where applicable), `subtype`
-  (references), `created`/`updated`.
-- **Commit AND push in the vault (`WM_VAULT_PATH`, default `~/wiki`) after every write** — a local-only commit in a
-  sync repo isn't backed up.
+
+- **READ `<vault>/SCHEMA.md` BEFORE WRITING, AND FOLLOW IT.** It is the vault's
+  own constitution and it governs every page in there, whoever wrote it —
+  frontmatter, folder, filename, the index entry, the log line, the page-size
+  and archiving rules. A capture routed here becomes an ordinary wiki page and
+  is indistinguishable from one written in a wiki session; it does not get a
+  dialect of its own.
+- Do **not** rely on this file for those details. They are deliberately not
+  repeated here: two copies of the vault's rules is exactly how they drift,
+  and the vault's copy is the one its own linter enforces.
+- Two things that file asks for and that are easy to skip under time pressure:
+  **search for an existing page first** (extending beats a near-duplicate),
+  and **update `index.md` and `log.md`** — a page missing from the index is
+  invisible to retrieval, since the index is where lookups start.
+- **Commit AND push in the vault after every write** — a local-only commit in
+  a syncing repo is not backed up.
 
 **Confirm** with ONE short line after each flush — **showing the destination**:
 `✅ → Todoist: buy stamps` · `✅ → wiki (project): renew passport` ·
