@@ -25,17 +25,21 @@ import sys
 PKG = pathlib.Path(__file__).resolve().parents[1]
 TESTS = PKG / "tests"
 
+# Labels are padded at print time, not written padded here — a hand-aligned
+# list silently misaligns the moment someone adds a longer name.
 SUITES = [
-    ("wmlib            ", "test_wmlib.py"),
-    ("raw transcript   ", "test_rawlog.py"),
-    ("todoist budget   ", "test_todoist_budget.py"),
-    ("capture gate     ", "test_gate.py"),
-    ("gate cases       ", "test_gate_cases.py"),
-    ("backup push      ", "test_backup.py"),
-    ("debounce hook    ", "test_debounce.py"),
+    ("wmlib", "test_wmlib.py"),
+    ("raw transcript", "test_rawlog.py"),
+    ("todoist budget", "test_todoist_budget.py"),
+    ("capture gate", "test_gate.py"),
+    ("gate cases", "test_gate_cases.py"),
+    ("backup push", "test_backup.py"),
+    ("debounce hook", "test_debounce.py"),
     ("no vestigial refs", "test_no_vestigial_refs.py"),
     ("vault schema sync", "test_vault_schema_sync.py"),
+    ("documented CLI", "test_documented_cli.py"),
 ]
+_W = max(len(label) for label, _ in SUITES)
 
 
 def _hermes_repo() -> pathlib.Path:
@@ -96,7 +100,7 @@ def main() -> int:
     for label, script in SUITES:
         path = TESTS / script
         if not path.exists():
-            print(f"  {label}  SKIP (missing {script})")
+            print(f"  {label:<{_W}}  SKIP (missing {script})")
             continue
         suite_env = dict(env)
         if script == "test_debounce.py":
@@ -110,9 +114,9 @@ def main() -> int:
                            capture_output=True, text=True, env=suite_env)
         tail = (r.stdout.strip().splitlines() or ["(no output)"])[-1]
         if r.returncode == 0:
-            print(f"  {label}  PASS  {tail}")
+            print(f"  {label:<{_W}}  PASS  {tail}")
         else:
-            print(f"  {label}  FAIL")
+            print(f"  {label:<{_W}}  FAIL")
             failures.append((script, r.stdout, r.stderr))
 
     if failures:

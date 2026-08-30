@@ -8,7 +8,7 @@ A frictionless personal working-memory system. Thoughts get captured via any con
 
 Voice capture is handled entirely on-device (VoiceInk on macOS, native dictation on iOS/iPad) before the message ever reaches Hermes, so Hermes only ever receives text. This also means the user sees and can edit the dictated text before sending, satisfying the "review before it's saved" requirement without any server-side transcription step.
 
-Core principle: **capture is dumb and instant; organization is the agent's job, done after the fact, and is always reversible because the raw log is the source of truth.**
+Core principle: **capture is dumb and instant; organization is the agent's job, done after the fact, and stays correctable because the raw log preserves what was actually said.** (Correctable by hand — nothing regenerates automatically; see §8.)
 
 Capture works identically on every client — Telegram, a web UI (via the api_server adapter), CLI, or any future platform — with no per-platform configuration. A message is working-memory input either because it starts with a marker, or because it arrives in a chat the user has explicitly reserved for that purpose (Section 2).
 
@@ -192,16 +192,34 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 ## 8. Promotion & consolidation policy
 
-**Promotion happens at capture time.** A capture is routed straight to its typed destination (§5a is canonical) — there is no staging period and nothing graduates later. The raw log remains the ground truth from which any note can be regenerated.
+**Promotion happens at capture time.** A capture is routed straight to its typed destination (§5a is canonical) — there is no staging period and nothing graduates later. The raw log records what was said on the way through.
 
 **Consolidation is not a job.** The nightly pass was removed in the 2026-08-29 cut: it cost tokens every night to report work the agent had already done inline at capture time. What survives is tidying the agent does while it is already editing a note:
 
-- Reference-flavoured content (procedures, entity pages) can be condensed when it grows unwieldy — it's derived and regenerable.
+- Reference-flavoured content (procedures, entity pages) can be condensed when it grows unwieldy — the vault's git history is what makes that safe to do.
 - Series notes (BP, headaches) stay itemized and are never collapsed — a measurement history is the point, and summarising destroys it.
 - Supersession: a newer fact replaces the older line; `status: superseded` on vault notes suppresses them from default answers.
 - Expired lines drop (resolved reminders, "due in a week" facts); the raw entry itself is untouched.
 
-Fully reversible — derived content regenerates from the raw log, so "that's mis-filed" or "split/merge these" just triggers a regeneration.
+**There is no regeneration mechanism, and this is not a rebuildable index.** An
+earlier draft said derived content "regenerates from the raw log" and that a
+mis-filing "just triggers a regeneration". Nothing does that. `rawlog.py`'s own
+docstring is blunt about it — *"nothing is ever reconstructed from it"* — and
+SKILL.md's actual procedure for a mis-filing is to edit or move the vault note
+by hand, never touching the transcript.
+
+The claim was also false in a second way: the transcript holds only what
+arrived through capture, while the vault has two writers (see the vault's
+`SCHEMA.md`) — a page written in a wiki session has no transcript entry behind
+it at all. A note is not generally derivable from the raw log even in
+principle.
+
+What the transcript actually buys is narrower and worth more: it is the record
+of what the user *said*, sitting upstream of the agent's judgment, so a
+mis-filing can be **noticed and repaired** rather than being invisible. The
+repair is a human or agent reading the entry and fixing the note. Reversibility
+of the *notes* comes from the vault's git history; the transcript is what tells
+you the note was wrong in the first place.
 
 **Handling `command` items:** run immediately — there is no later pass to defer to. "Forget entirely" removes or deprecates the *derived* artifacts (the vault note, the Todoist task) — confirm with the user first, since it's the one destructive, hard-to-reverse action in the system. If a command is ambiguous about which entry/topic it means, ask rather than guess.
 
@@ -275,7 +293,7 @@ Questions are diverted here by the extraction pass — question items never prod
 
 **C. Vault content (project / reference / idea / narrative record)** — search the vault by title, backlink, or domain tag; exclude `status: archived` / `superseded` from default answers (surface them if explicitly asked). Reference pages look up by name (entity/concept/procedure); Projects by open status.
 
-**D. Everything else, and fallback** — the raw log is the ground truth: `rawlog.py search --tag/--text/--type` (covering the current month and `raw/archive/`). Answers conversationally; the user never needs to know or guess a tag or type name.
+**D. Everything else, and fallback** — the raw log is the record of what was said: `rawlog.py search --text/--since/--until` (covering the current month and `raw/archive/`). Those are the only filters; the transcript carries no tags or types to search on, since the cut left it a timestamp and text. Answers conversationally.
 
 At this personal scale, keyword search over a small file set is sufficient — no index, no vector DB, no embedding search needed.
 
