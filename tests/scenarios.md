@@ -63,6 +63,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 | `that should have been a project, not an idea` | Re-routed; the old note is gone or updated, not duplicated. |
 | Ask for something the wiki already covers | `↩︎ already filed → …`, naming the existing page or line. A `✅ →` here is a bug: it claims a write that did not happen. |
 | `mark the plumber task done` | Closed in Todoist. |
+| `clear the completed items off the X checklist` | Only ticked items go. The log entry names each one **and carries any detail the line held** — the line is gone, so the log is the record. Ticked items are never cleared unasked. |
 | `forget what I said about the taxi driver` | **Confirms first.** Then removes the derived note/task — and says plainly that the transcript still has the words. |
 | `reserve for memory` *(in a new chat)* | Confirms; that chat now captures without a marker. |
 | `release for memory` | Confirms; the chat returns to ordinary conversation. |

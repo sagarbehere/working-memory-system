@@ -90,7 +90,7 @@ Then classify the item and route it:
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
 | **artifact** (photo, PDF, scan) | leave the file where it already syncs; file a `record` note with `file_ref:` | Never copy the file into the vault. `file_ref` must be a **stable** location, never a path the user might reorganise (schema §9). If you only have a chat attachment and no durable path, say so and ask where it lives. |
-| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit); substantial/multi-step → project note body |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit). **Ticked items stay until the user asks to clear them** — never tidy unasked. When clearing, carry anything the item recorded into the log entry: once the line is gone, the log is the only remaining record short of a git diff, and it is append-only so the detail costs nothing there. "Removed 4 ticked items" loses "first nightly push succeeded, remote HEAD matches local"; say both. | substantial/multi-step → project note body |
 
 **Vault write discipline (all vault destinations):**
 
