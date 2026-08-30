@@ -11,6 +11,12 @@ hook, or a CLI — fifteen minutes, in your real Telegram lane, against your
 real vault. It is deliberately not automated: at one user's volume you are the
 integration test, and a hand-run checklist costs nothing to keep honest.
 
+**Start a new conversation first.** The skill is injected when a session is
+created, so a lane you have had open for days is still running the `SKILL.md`
+it started with — `/reload-skills` does not change that. Walking this list in
+an old session tests the old policy and tells you nothing about the change you
+just made.
+
 **How to use it.** Say the left column, check the right. Anything that
 disagrees is either a skill bug (fix the policy), a tooling gap (fix the CLI —
 better, because it makes the mistake impossible), or a wrong expectation

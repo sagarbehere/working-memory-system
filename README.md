@@ -155,7 +155,9 @@ Then:
    there is no OS crontab entry.
 5. **Restart the gateway** so the hook loads: `hermes gateway restart` (from a
    shell, not from inside an agent session).
-6. **`/reload-skills`** in your chat client.
+6. **`/reload-skills`** in your chat client, then **start a new
+   conversation** — the skill is injected when a session begins, so a chat you
+   already have open keeps the version it started with.
 
 Verify the whole install at any time:
 
