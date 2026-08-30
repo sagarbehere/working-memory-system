@@ -110,11 +110,24 @@ Then classify the item and route it:
 - **Commit AND push in the vault after every write** — a local-only commit in
   a syncing repo is not backed up.
 
-**Confirm** with ONE short line after each flush — **showing the destination**:
-`✅ → Todoist: buy stamps` · `✅ → wiki (project): renew passport` ·
-`✅ → wiki (checklist): WM — X` · `✅ → wiki (series): BP 128/82` ·
-`✅ → wiki (concept): …`. If the user says
-"No, that should be a project note / a Todoist task", re-route on the spot.
+**Confirm** with ONE short line after each flush. The marker carries the
+outcome and the rest names the destination, so a glance is enough:
+
+- **`✅ →` something was written.** `✅ → Todoist: buy stamps` ·
+  `✅ → wiki (project): renew passport` · `✅ → wiki (checklist): WM — X` ·
+  `✅ → wiki (series): BP 128/82` · `✅ → wiki (concept): …`
+- **`↩︎` nothing was written, and that was correct.** Use this when the thing
+  is already filed — a near-duplicate checklist line, a note that already
+  covers it, or `rawlog.py add` reporting `"duplicate": true`. Name what
+  already exists so the decision can be checked:
+  `↩︎ already filed → wiki (checklist): "Create a blog post on sagar.se…"`.
+  **Never use `✅ →` for a no-op**: that arrow means a write happened, and a
+  reader skimming confirmations should be able to trust it.
+- **`⚠️` nothing was written, and that is a problem.** The Todoist call failed,
+  a vault write failed. Say what did not happen — see **Failure handling**.
+
+If the user says "No, that should be a project note / a Todoist task",
+re-route on the spot.
 
 ## Retrieve (pick the store by what's asked)
 

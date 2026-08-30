@@ -32,7 +32,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 
 | Say | Expect |
 |---|---|
-| `printer is out of ink` *(in the lane)* | Filed. One-line confirmation naming the destination. Appears verbatim in `raw/`. |
+| `printer is out of ink` *(in the lane)* | Filed. Confirmation starts `✅ →` and names the destination. Appears verbatim in `raw/`. |
 | `Hey memory printer is out of ink` *(outside the lane)* | Same, and the marker is **not** part of the stored text. |
 | `remind me Tuesday at 8am to call the plumber` | A Todoist task, due Tue 08:00 **in your timezone**. Confirmation says Todoist. |
 | `BP 128/82 this morning` | Appended as ONE line to the blood-pressure series note — not a new note per reading. |
@@ -43,7 +43,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 | `what if the balcony became a reading nook` | An idea note. |
 | `buy stamps` | A Todoist task only — no vault note. |
 | Three thoughts sent in quick succession | **One** agent turn covering all three, not three. (This is the debounce; if it fires three times, the hook is broken.) |
-| The exact same message twice within a minute | Filed once. The second is reported as a duplicate. |
+| The exact same message twice within a minute | Filed once. The second is reported with `↩︎`, **not** `✅ →`. |
 
 ## Retrieval
 
@@ -61,6 +61,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 | Say | Expect |
 |---|---|
 | `that should have been a project, not an idea` | Re-routed; the old note is gone or updated, not duplicated. |
+| Ask for something the wiki already covers | `↩︎ already filed → …`, naming the existing page or line. A `✅ →` here is a bug: it claims a write that did not happen. |
 | `mark the plumber task done` | Closed in Todoist. |
 | `forget what I said about the taxi driver` | **Confirms first.** Then removes the derived note/task — and says plainly that the transcript still has the words. |
 | `reserve for memory` *(in a new chat)* | Confirms; that chat now captures without a marker. |
@@ -74,6 +75,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 | `Note that the deadline moved to Friday` | Answered normally. Nothing filed — `note` is not a marker. |
 | `thanks, that worked` *(in the lane)* | Recognised as chit-chat. Nothing filed. |
 | Any capture | No approval prompts. If the agent asks to run inline `python3`, a tool is missing — that is the bug, not the prompt. |
+| `Hey, memory, remind me…` *(comma inside the marker, outside the lane)* | Captured. If the agent instead answers conversationally and has to fetch the skill itself, the gate missed it. |
 
 ## Health
 
