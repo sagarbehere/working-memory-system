@@ -40,7 +40,7 @@ hooks/working-memory-debounce/handler.py
 SKILL.md                  the agent's policy (installed as a Hermes skill)
 setup.sh / export.sh      installer / machine-to-machine migration
 verify-on-vps.sh          full verification against the live install
-tests/                    8 suites; tests/run_all.py runs them all
+tests/                    9 suites; tests/run_all.py runs them all
 ```
 
 Design docs, in the order worth reading:

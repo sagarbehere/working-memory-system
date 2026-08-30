@@ -34,6 +34,7 @@ SUITES = [
     ("backup push      ", "test_backup.py"),
     ("debounce hook    ", "test_debounce.py"),
     ("no vestigial refs", "test_no_vestigial_refs.py"),
+    ("vault schema sync", "test_vault_schema_sync.py"),
 ]
 
 
