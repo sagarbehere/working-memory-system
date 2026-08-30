@@ -47,6 +47,7 @@ import asyncio
 import json
 import os
 import pathlib
+import re
 import sys
 from datetime import datetime
 
@@ -124,6 +125,16 @@ LANES_FILE = WM_ROOT / "meta" / "lanes.json"
 # "Hey memory" is. The cost — four more characters — falls only on capture
 # from an unreserved chat, since a reserved lane needs no marker at all.
 MARKERS = ("hey memory",)
+# Matched tolerantly: punctuation and extra spacing BETWEEN the marker's words
+# are ignored, so "Hey, memory," works as well as "Hey memory,". People
+# punctuate a vocative naturally — and dictation inserts that comma on its own
+# — but a strict prefix match sees "hey," and falls through to ordinary
+# conversation, silently. The word-boundary rule after the marker is unchanged,
+# so "hey memories" and "Hey memorial" still do not match.
+_MARKER_RES = tuple(
+    (m, re.compile(r"[\W_]*".join(re.escape(w) for w in m.split()), re.I))
+    for m in MARKERS
+)
 # Reservation phrases — exactly two, symmetric, dictionary words
 # ("release" is the spellchecker-clean pair for "reserve").
 # Case-insensitive; trailing words tolerated ("release for memory please").
@@ -243,12 +254,12 @@ def _parse_marker(text) -> "str | None":
     """
     if not text:
         return None
-    low = text.lower()
-    for m in MARKERS:
-        if low.startswith(m):
-            nxt = low[len(m):len(m) + 1]
+    for name, rx in _MARKER_RES:
+        hit = rx.match(text)
+        if hit:
+            nxt = text[hit.end():hit.end() + 1]
             if not nxt or not (nxt.isalnum() or nxt in "-_"):
-                return m
+                return name
     return None
 
 

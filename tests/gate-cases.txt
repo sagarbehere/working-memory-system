@@ -28,8 +28,16 @@ capture | Hey memory what did I decide about the printer?
 capture | Hey memory
 capture | Hey memory   BP 128/82 this morning
 
+# --- punctuation inside the marker: people write the vocative with a comma,
+#     and dictation adds one unprompted. A strict prefix match missed these.
+capture | Hey, memory, add a checklist item
+capture | Hey, memory: buy stamps
+capture | hey,memory do this
+capture | Hey  memory   with extra spacing
+
 # --- near misses that must NOT be captured ---
 ignore | hey memories are strange things
+ignore | Hey, memories are strange things
 ignore | Hey memorial service is on Friday
 ignore | I said hey memory but not at the start
 ignore | Talk to me about my memory system
