@@ -144,7 +144,11 @@ Then:
 
 1. **Edit** `~/.hermes/working-memory.env` — at minimum `WM_VAULT_PATH` (your
    vault), `TODOIST_MIRROR_ENABLED=true`, and `WM_TZ` if it differs from the
-   machine's zone.
+   machine's zone. Optional: `WM_VAULT_SKILL=<skill-name>` layers a personal
+   vault-operation skill (loaded via `skill_view` when a capture routes to
+   the vault — e.g. your own wiki skill with device/sync preferences);
+   without it, the generic vault discipline in SKILL.md applies (pull
+   `--ff-only` before writes, follow `<vault>/SCHEMA.md`, commit AND push).
 2. **Add your Todoist token** as `TODOIST_API_TOKEN` in `~/.hermes/.env` —
    Hermes' own secrets file, where your bot tokens already live. Secrets go
    there; everything else in the working-memory env file above.

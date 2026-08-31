@@ -86,21 +86,36 @@ already there, do not write it again — confirm with `↩︎` instead.
 
 **Vault write discipline (all vault destinations):**
 
-- **READ `<vault>/SCHEMA.md` BEFORE WRITING, AND FOLLOW IT.** It is the vault's
-  own constitution and it governs every page in there, whoever wrote it —
-  frontmatter, folder, filename, the index entry, the log line, the page-size
-  and archiving rules. A capture routed here becomes an ordinary wiki page and
-  is indistinguishable from one written in a wiki session; it does not get a
-  dialect of its own.
-- Do **not** rely on this file for those details. They are deliberately not
-  repeated here: two copies of the vault's rules is exactly how they drift,
-  and the vault's copy is the one its own linter enforces.
+- **Two schemas, two stages — read the right one at the right stage.**
+  `second-brain-schema.md` (in this package) governs CLASSIFICATION of the
+  incoming message: what kind of thing it is and where it goes.
+  `<vault>/SCHEMA.md` governs PAGE CONSTRUCTION: frontmatter, folder,
+  filename, the index entry, the log line, the page-size and archiving rules.
+  Classify per the first, then build the page per the second. A capture
+  routed here becomes an ordinary wiki page and is indistinguishable from one
+  written in a wiki session; it does not get a dialect of its own.
+- **READ `<vault>/SCHEMA.md` BEFORE WRITING, AND FOLLOW IT.** It is the
+  vault's own constitution and it governs every page in there, whoever wrote
+  it. Do **not** rely on this file (SKILL.md) for those details — they are
+  deliberately not repeated here: two copies of the vault's rules is exactly
+  how they drift, and the vault's copy is the one its own linter enforces.
+- **Pull before you write: `git -C <vault> pull --ff-only`.** Devices push
+  concurrently, so the VPS copy can be stale between sessions; writing to a
+  stale vault risks conflicts and near-duplicates. `--ff-only` refuses rather
+  than merges if the tree is dirty or diverged — resolve before operating.
 - Two things that file asks for and that are easy to skip under time pressure:
   **search for an existing page first** (extending beats a near-duplicate),
   and **update `index.md` and `log.md`** — a page missing from the index is
   invisible to retrieval, since the index is where lookups start.
 - **Commit AND push in the vault after every write** — a local-only commit in
   a syncing repo is not backed up.
+- **Optional personal overlay.** If `WM_VAULT_SKILL` in
+  `~/.hermes/working-memory.env` names an installed skill, `skill_view` it
+  when a capture routes to the vault and follow its operational rules
+  alongside this section (it may add personal preferences and device/sync
+  context). If it is unset or the skill is missing, proceed with this generic
+  discipline — **never fail, never skip the write, because the personal
+  skill is absent.**
 
 **Confirm** with ONE short line after each flush. The marker carries the
 outcome and the rest names the destination, so a glance is enough:
@@ -240,8 +255,9 @@ and did not get written.
 ## Escalation
 
 Not clearly covered? Consult in order: `second-brain-schema.md` (what kind of
-thing is this?) → `working-memory-system-spec.md` §5a (where does that kind
-of thing go here?) → `decisions.md` (why is it this way, and what was
-deliberately not built?) → `logs/` (what happened on a past run). SKILL.md is
-git-versioned on `main`, so every accepted refinement is diffable and
-revertible.
+thing is this? — message classification) → `<vault>/SCHEMA.md` (how is a page
+written? — page structure; read before any vault write) →
+`working-memory-system-spec.md` §5a (where does that kind of thing go here?)
+→ `decisions.md` (why is it this way, and what was deliberately not built?)
+→ `logs/` (what happened on a past run). SKILL.md is git-versioned on `main`,
+so every accepted refinement is diffable and revertible.
