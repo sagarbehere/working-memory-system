@@ -75,10 +75,72 @@ the tag does not.
   verbatim transcript, because the one genuinely unreliable component here is
   the LLM's judgment, and the transcript is the only thing upstream of it. The
   *machinery* went because nothing linked back to an entry any more.
+  *(The transcript itself went two days later — see the next section. The
+  argument above is left as written because it was the honest reasoning at the
+  time, and what changed was not the argument but whether this repo needed to
+  be the one making it.)*
 
 What the cut deliberately did NOT touch: the capture hook, the transcript
 itself, the vault routing, and the watchdogs. Those were either expensive to
 learn or cheap and load-bearing.
+
+---
+
+## The 2026-08-31 transcript cut
+
+`rawlog.py` and the `raw/` log are gone. Every capture used to be appended
+there verbatim before anything was decided about it; now a capture goes
+straight to the vault or Todoist and this system keeps no record of the
+message it was filed from.
+
+**Why.** The transcript had exactly two jobs, and neither is wanted:
+
+1. **Recovering a mis-filed or dropped capture.** The premise was that the
+   LLM's judgment is the fallible part, so something must sit upstream of it.
+   True as far as it goes — but in practice the recovery never happened. A
+   mis-filing is noticed in the conversation, seconds after it occurs, and
+   corrected there.
+2. **"Did I ever say X" about something never filed.** A search over the
+   user's own words, answering what the notes cannot.
+
+This is the same test already applied to the SQLite records store, the
+reminder mirror and the consolidation job: **not "does this cost too much"
+but "is anyone using it for anything".** The SQLite store was deleted with
+zero rows in it; the transcript is deleted with zero recoveries made from it.
+A component that is *conceptually* load-bearing and *actually* untouched is
+still a component to remove — that judgment is the whole reason this file
+exists. Cost was never the argument here: the transcript was small, fast, and
+had no API budget or concurrency implications.
+
+**The dependency this creates, stated plainly.** Both jobs are now done by
+**Hermes' own session storage** — `~/.hermes/state.db`, FTS5-indexed, reached
+through the `session_search` tool. It holds the actual conversation, which is
+strictly more than the transcript ever did (the agent's replies too, not just
+the user's words), and it exists at the platform layer whether this app wants
+it or not. Keeping a second copy inside this app was duplicating a platform
+feature.
+
+That reliance is **external to this repository and unverified by it.** Nothing
+in `tests/` can assert it, `verify-on-vps.sh` does not check it, and it is not
+covered by this system's backups. It rests on an assumption worth naming:
+
+> **`sessions.auto_prune` stays off (the Hermes default), or is set to a
+> retention window generous enough to cover how far back you would ever ask.**
+
+If that assumption breaks, it breaks *silently* — the failure looks like an
+ordinary "I don't have anything about that", which is indistinguishable from
+never having said it. That is the same shape as the bugs this repo has been
+bitten by before (a check that matches nothing looks exactly like a check that
+passes), so it is recorded here as a monitored assumption rather than left
+implicit in a design diagram. **If you turn session pruning on, this cut is
+what makes that a data-loss decision rather than a housekeeping one.**
+
+**Reversibility.** This is a code deletion, not a data deletion, and the two
+are not comparable. `git checkout <sha>^ -- rawlog.py tests/test_rawlog.py`
+brings the component back in full, and `raw/` directories on existing installs
+were deliberately left in place — the code went, not the words already
+written. Nothing in this cut destroys anything, which is precisely why it did
+not need the caution that a data decision would.
 
 ---
 
