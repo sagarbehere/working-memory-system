@@ -155,11 +155,13 @@ Canonical rules: `second-brain-schema.md` §10. Only the decisions here:
   is syncing across devices is not backed up. This is a recurring failure mode,
   which is why the nightly watchdog checks for unpushed vault commits.
 - **Todoist needs no backup infrastructure** beyond a nearly-free nightly
-  export, being reasonably trusted hosted infrastructure.
+  export, being reasonably trusted hosted infrastructure. *(The export went
+  in the 2026-08-31 watchdog cut — see below. The premise held; what changed
+  is that "nearly free" stopped being worth even that.)*
 - **The canonical domain-tag list lives in the vault (`_meta/tags.md`), not in
   `/working-memory/meta/`.** It is already git-backed and synced to every
-  device there, and it is content the user reads and edits — one fewer thing
-  for the backup push to cover. This decision matters because the vocabulary
+  device there, and it is content the user reads and edits — it belongs with
+  the notes, not with this system's bookkeeping. This decision matters because the vocabulary
   and the raw-log index were once considered for the same home, and the names
   still invite confusion: `_meta/tags.md` is the **vocabulary** (which tags
   may be used); `meta/tag-index.json` was an **inverted index** (which raw
@@ -168,6 +170,11 @@ Canonical rules: `second-brain-schema.md` §10. Only the decisions here:
 ---
 
 ## Backup design
+
+**Superseded in part by the 2026-08-31 watchdog cut below**, which retired the
+private remote for `WM_ROOT`. The reasoning here is kept because it is why the
+remote was built, and because the last three points still stand — read it as
+the argument that was true while `WM_ROOT` still held the transcript.
 
 Four systems exist; only one needed new infrastructure. The reasoning matters
 more than the mechanism:
@@ -203,6 +210,69 @@ the live file was only ever read. **The general rule survives the deletion:
 never swap a file out from under a process that has it open, and when a bug
 only manifests after a later trigger (here, a WAL checkpoint), a test that
 skips that trigger will pass while the bug is still there.**
+
+---
+
+## The 2026-08-31 watchdog cut
+
+`wm-backup-push.py` is now `wm-watchdog.py` and does two of its five jobs.
+
+**Cut — the backup half:**
+
+1. **The nightly Todoist export** (`todoist-export.jsonl`).
+2. **`git add -A` + commit of `WM_ROOT`.**
+3. **`git push` to the private remote.** The remote itself is being deleted
+   by the user, outside this repository.
+
+**Kept — the health half**, unchanged in behaviour:
+
+4. **`recent_failures()`** — failure lines logged in the last day. The capture
+   path writes them and nobody reads `logs/`; without this a persistent
+   problem stays invisible.
+5. **The vault sync check** — fetch, pull `--ff-only` when behind (devices
+   push legitimately, so being behind is silent), alert on unpushed local
+   commits or a failed pull.
+
+Plus `prune_logs()`, unrelated hygiene, kept regardless.
+
+**Why the split falls exactly there.** The three cut jobs protected
+`WM_ROOT`. After the transcript cut (above), `WM_ROOT` holds `lanes.json`,
+diagnostic logs, and a disposable cache — nothing the user has said they mind
+losing, and all of it cheap to recreate. The two kept jobs protect the
+**vault**, which holds the actual notes, and losing those has never been
+acceptable. A watchdog that guards the cheap thing and the precious thing with
+equal ceremony teaches you nothing about which is which.
+
+Note what this means about the surviving check: **the vault sync alert is now
+the single most valuable line this system prints.** An unpushed vault commit
+is a note that exists on one machine, and it is silent without a watchdog.
+Everything else here is diagnostics.
+
+**The rename is part of the change, not cosmetic.** A file called
+`wm-backup-push.py` that backs nothing up is a trap for the next reader, and
+this repo has been bitten by exactly that shape before — a name outliving its
+meaning, a wrapper outliving its target. The old name is in the
+vestigial-reference checker so it cannot quietly return.
+
+**What this costs, stated plainly.** Two real losses, both accepted:
+
+- **Todoist tasks now have no off-box copy at all.** The export was the only
+  one. This is the one place the cut removed a genuine redundancy rather than
+  a redundant one; the judgment is that Todoist's own hosting is more reliable
+  than a nightly JSONL in a directory nobody reads.
+- **`WM_ROOT` has no version history going forward.** It is still a git repo
+  with its history intact, but nothing commits to it automatically any more.
+  Reserving a lane is now an uncommitted change until someone commits it by
+  hand.
+
+**Deliberate non-changes.** `WM_ROOT` stays a git repo — leaving it initialised
+costs nothing and keeps a manual commit available if a reason appears. And
+`setup.sh` still creates it that way. Neither is an oversight; both are the
+cheap option that preserves a door.
+
+**Reversibility.** Code deletion, not data deletion: the removed steps come
+back with `git checkout <this commit>^ -- wm-backup-push.py`. The private
+remote is the part that does not, and it is being deleted deliberately.
 
 ---
 
