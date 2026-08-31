@@ -65,7 +65,7 @@ else
 fi
 
 sec "3. Every script still imports and runs --help"
-for s in wmlib.py todoist.py wm-backup-push.py; do
+for s in wmlib.py todoist.py wm-watchdog.py; do
   if "$PY" -c "import py_compile,sys; py_compile.compile('$PKG_DIR/$s', doraise=True)" 2>/dev/null; then
     ok "compiles: $s"
   else
@@ -121,14 +121,14 @@ for p in "$HERMES_HOME/hooks/working-memory-debounce" \
 done
 echo "  wrapper scripts in $HERMES_HOME/scripts:"
 ls -1 "$HERMES_HOME/scripts" 2>/dev/null | sed 's/^/    /' || echo "    (none)"
-for w in todoist.py wm-backup-push.py; do
+for w in todoist.py wm-watchdog.py; do
   if [ -f "$HERMES_HOME/scripts/$w" ] && grep -q "Wrapper" "$HERMES_HOME/scripts/$w" 2>/dev/null; then
     ok "wrapper installed: $w"
   else
     bad "$w is missing or is a stale COPY, not a wrapper — re-run setup.sh"
   fi
 done
-for gone in reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py; do
+for gone in reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py wm-backup-push.py; do
   if [ -e "$HERMES_HOME/scripts/$gone" ]; then
     bad "$gone still present in ~/.hermes/scripts — DELETE it; it is a stale copy of removed code"
   else

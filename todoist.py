@@ -45,8 +45,8 @@ def token(required: bool = True):
     """The API token, or None when unset and required=False.
 
     Callers that must stay silent when Todoist simply isn't configured
-    (the nightly backup watchdog) pass required=False and skip; callers
-    that were asked to do Todoist work let the exception propagate.
+    pass required=False and skip; callers that were asked to do Todoist
+    work let the exception propagate.
     """
     tok = wmlib.hermes_env().get("TODOIST_API_TOKEN", "").strip()
     if not tok and required:
@@ -119,8 +119,9 @@ def cached_project_id(name=None, tok=None):
     Resolving it costs a full GET /projects and it never changes, so paying
     that on every reminder would double the API cost of creating one. The
     cache is disposable — a stale id surfaces as a failed create, which clears
-    it — and is gitignored, since a tracked cache would give the nightly
-    backup something to commit every night.
+    it — and is gitignored, because a disposable cache does not belong in
+    version control. (It was originally gitignored to stop the nightly backup
+    committing it every night; that job is gone, the reason is not.)
     """
     name = name or default_project()
     path = _cache_path()

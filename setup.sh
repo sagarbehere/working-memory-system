@@ -101,13 +101,13 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #     take effect immediately — no refresh step; re-run setup.sh only if
 #     the package moves or a new helper script is added. The package path
 #     is baked in at generation time (2026-08-29 wrapper model):
-#       - wm-backup-push.py         -> nightly backup push to the private
-#         remote (watchdog: silent when healthy, alerts on failure; also
-#         reports anything that failed quietly and prunes old logs)
+#       - wm-watchdog.py            -> nightly health watchdog: silent when
+#         healthy; reports anything that failed quietly and checks the vault
+#         is pushed. Backs nothing up (2026-08-31).
 #       - todoist.py                -> Todoist client (the reminder layer)
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-backup-push.py todoist.py"
+WRAPPED_SCRIPTS="wm-watchdog.py todoist.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then
@@ -134,7 +134,7 @@ echo "Wrapper scripts installed (exec package copies): $WRAPPED_SCRIPTS"
 #     resolves scripts from this directory — that is how a superseded script
 #     once stayed in the scheduler's path. Named explicitly, never a directory
 #     sweep: other projects keep their own scripts here.
-RETIRED_SCRIPTS="reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py"
+RETIRED_SCRIPTS="reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py wm-backup-push.py"
 for s in $RETIRED_SCRIPTS; do
   target="$HERMES_HOME/scripts/$s"
   if [ -f "$target" ]; then
@@ -184,9 +184,11 @@ echo "2) Optional frictionless lane: set WM_TELEGRAM_CHAT_ID (+ THREAD_ID)"
 echo "   in $HERMES_HOME/working-memory.env as a legacy seed, OR reserve a"
 echo "   chat in-band with 'reserve for memory' (any platform; release"
 echo "   with 'release for memory'). Markers are implied in reserved chats."
-echo "3) No OS crontab entry is needed. If you are UPGRADING and have a"
-echo "   reminder-check.py line in your crontab, remove it — that script is"
-echo "   gone (crontab -e)."
+echo "3) Register ONE Hermes cron job: wm-watchdog.py, no_agent, nightly."
+echo "   If you are UPGRADING from wm-backup-push.py, re-point that existing"
+echo "   job at wm-watchdog.py — the old script is gone, and a cron entry"
+echo "   naming it will fail every night. No OS crontab entry is needed;"
+echo "   remove any reminder-check.py line still in yours (crontab -e)."
 echo "4) Restart the gateway so the hook loads (run from SSH, not from"
 echo "   inside an agent session — it deadlocks there):"
 echo "   hermes gateway restart"
