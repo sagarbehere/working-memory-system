@@ -42,6 +42,8 @@ REMOVED = {
     "WM_RAW_RETENTION_DAYS": "raw rotation; search reads the archive anyway",
     "rawlog.py": "the raw capture log CLI (2026-08-31 cut)",
     "rawlog.lock": "the transcript append lock; there is no transcript",
+    "wm-backup-push.py": "renamed to wm-watchdog.py when the backup half went",
+    "todoist-export.jsonl": "the nightly Todoist export (2026-08-31 cut)",
 }
 
 # Exemptions. Map file -> "*" (whole file) or a set of specific tokens, so
@@ -49,26 +51,37 @@ REMOVED = {
 # token in that file.
 ALLOWED = {
     "tests/test_no_vestigial_refs.py": "*",     # this file lists them
+    # These two are where a removal is explained; both must be able to name
+    # the thing removed. wm-backup-push.py in particular is a RENAME, so the
+    # old name has to survive in prose or nobody can find the new one.
     "decisions.md": "*",  # records WHY they went
-    "working-memory-system-spec.md": "*",    # §9 records why the layer went
+    "working-memory-system-spec.md": "*",    # §9 and §18 record why
     "review-notes.md": "*",                     # dated decision log; history
     # These must NAME the removed things in order to check they are absent, or
     # to tell the user to clean them up.
     "verify-on-vps.sh": {"reminders.py", "records.py", "reminder-check.py",
                          "records.db", "reminders.json", "records-snapshot.db",
                          "tag-index.json", "wm-consolidation-gate.py",
-                         "cron-session-prune.py", "rawlog.py"},
+                         "cron-session-prune.py", "rawlog.py",
+                         "wm-backup-push.py"},
     "setup.sh": {"records.db", "reminders.json", "records-snapshot.db",
                  "reminder-check.py", "reminders.py", "records.py",
                  "wm-consolidation-gate.py", "cron-session-prune.py",
-                 "rawlog.py"},
-    "crontab.example": {"reminder-check.py"},
+                 "rawlog.py", "wm-backup-push.py"},
+    # Tells an upgrader to re-point a cron entry that still names the old
+    # script — it must say the old name to be useful.
+    "crontab.example": {"reminder-check.py", "wm-backup-push.py"},
     # These two explain, in their docstrings, the removed thing that motivated
     # them. Named per-token so the rest of the guard still applies to them —
     # test_documented_cli.py shipped with an unexempted mention that went
     # unnoticed only because the file was still untracked when the suite ran.
     "tests/test_documented_cli.py": {"rawlog.py", "wm-consolidation-gate.py"},
     "tests/test_todoist_budget.py": {"rawlog.py"},
+    "tests/test_watchdog.py": {"wm-backup-push.py"},   # says what it used to test
+    # Its own docstring records what it was and which jobs it lost. A renamed
+    # file that does not say what it used to be called leaves the next reader
+    # with a dangling cron entry and no way to connect the two.
+    "wm-watchdog.py": {"wm-backup-push.py", "todoist-export.jsonl"},
 }
 
 
@@ -195,6 +208,9 @@ def main():
     check(not (PKG / "records.py").exists(), "records.py is really gone")
     check(not (PKG / "reminder-check.py").exists(), "reminder-check.py is really gone")
     check(not (PKG / "rawlog.py").exists(), "rawlog.py is really gone")
+    check(not (PKG / "wm-backup-push.py").exists(),
+          "wm-backup-push.py is really gone (renamed to wm-watchdog.py)")
+    check((PKG / "wm-watchdog.py").exists(), "wm-watchdog.py is in its place")
     check(not (PKG / "tests" / "test_rawlog.py").exists(),
           "test_rawlog.py is really gone")
     print(f"NO VESTIGIAL REFERENCES ({scanned} files scanned, "

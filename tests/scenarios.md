@@ -83,6 +83,6 @@ better, because it makes the mistake impossible), or a wrong expectation
 
 | Check | Expect |
 |---|---|
-| Wait for the nightly backup | Silence. Any output is a real problem — it now also reports anything that failed quietly in the last day. |
+| Wait for the nightly watchdog | Silence. Any output is a real problem: an unpushed vault commit, a failed vault pull, or something that failed quietly in the last day. It backs nothing up, so there is no push to verify. |
 | `cd ~/working-memory && git log --oneline -3` | Recent commits; nothing uncommitted for long. |
 | `cd <vault> && git status` | Clean and pushed — a local-only commit is not backed up. |

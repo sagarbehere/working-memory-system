@@ -32,7 +32,7 @@ SUITES = [
     ("todoist budget", "test_todoist_budget.py"),
     ("capture gate", "test_gate.py"),
     ("gate cases", "test_gate_cases.py"),
-    ("backup push", "test_backup.py"),
+    ("watchdog", "test_watchdog.py"),
     ("debounce hook", "test_debounce.py"),
     ("no vestigial refs", "test_no_vestigial_refs.py"),
     ("vault schema sync", "test_vault_schema_sync.py"),

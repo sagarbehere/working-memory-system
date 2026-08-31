@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Integration tests for wm-backup-push.py against scratch repos. No network.
+"""Integration tests for wm-watchdog.py against scratch repos. No network.
 
-Builds a throwaway WM_ROOT git repo with a file:// bare remote and a fake
-vault, so every step (commit, push, vault sync) runs for real.
+Builds a throwaway WM_ROOT and a fake vault with a file:// bare remote, so
+the vault sync path runs for real.
 
 The property that matters most is silence: a healthy night must print
-nothing, or the watchdog trains you to ignore it.
+nothing, or the watchdog trains you to ignore it. Everything this script
+still does is in service of one thing — noticing that the VAULT, where the
+notes actually are, is not backed up or that something has been failing
+quietly.
 
-Run: python3 tests/test_backup.py   (from the package dir)
+Until 2026-08-31 this was test_backup.py and it also covered a Todoist
+export, a WM_ROOT commit and a push to a private remote. Those steps are
+gone (decisions.md, "The 2026-08-31 watchdog cut"), and so are their tests.
+
+Run: python3 tests/test_watchdog.py   (from the package dir)
 """
 import json
 import os
@@ -57,21 +64,21 @@ def init_work(path):
     git(path, "config", "commit.gpgsign", "false")
 
 
-def _fixture(with_vault=True):
-    """A WM_ROOT git repo with a bare remote, plus an optional vault clone."""
-    td = pathlib.Path(tempfile.mkdtemp(prefix="wm-backup-test-"))
-    root, remote = td / "wm", td / "remote.git"
+def _fixture(with_vault=True, wm_is_git=True):
+    """A WM_ROOT (git repo by default) plus an optional vault clone.
+
+    WM_ROOT gets no remote: nothing pushes it any more. wm_is_git=False
+    covers an install where it was never a git repo at all, which is now a
+    perfectly ordinary configuration rather than something to alert about.
+    """
+    td = pathlib.Path(tempfile.mkdtemp(prefix="wm-watchdog-test-"))
+    root = td / "wm"
     (root / "meta").mkdir(parents=True)
-    (root / "raw").mkdir()
-    (root / "raw" / "2026-08.md").write_text("## 2026-08-01T00:00:00+05:30\n")
-    init_bare(remote)
-    init_work(root)
-    (root / ".gitignore").write_text("meta/*.lock\n*.tmp\n")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "init")
-    git(root, "remote", "add", "origin", str(remote))
-    r = git(root, "push", "-q", "-u", "origin", "main")
-    assert r.returncode == 0, f"fixture push failed: {r.stderr}"
+    if wm_is_git:
+        init_work(root)
+        (root / ".gitignore").write_text("meta/*.lock\n*.tmp\n")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "init")
 
     vault = td / "wiki"
     if with_vault:
@@ -92,13 +99,13 @@ def _fixture(with_vault=True):
     return td, root, vault, hermes
 
 
-def _run_backup(hermes, extra_env=None):
+def _run_watchdog(hermes, extra_env=None):
     env = dict(os.environ, HERMES_HOME=str(hermes))
     env.pop("WM_ROOT", None)
     env.pop("WM_VAULT_PATH", None)
     if extra_env:
         env.update(extra_env)
-    return subprocess.run([sys.executable, str(PKG / "wm-backup-push.py")],
+    return subprocess.run([sys.executable, str(PKG / "wm-watchdog.py")],
                           capture_output=True, text=True, env=env)
 
 
@@ -109,15 +116,53 @@ def test_silent_when_healthy():
     healthy run, which trains you to ignore the watchdog.
     """
     td, root, _vault, hermes = _fixture()
-    r = _run_backup(hermes)
+    r = _run_watchdog(hermes)
     check(r.returncode == 0, "healthy run exits 0")
     check(r.stdout.strip() == "",
           f"healthy run is SILENT (got {r.stdout.strip()!r})")
 
     td2, root2, _v2, hermes2 = _fixture(with_vault=False)
-    r = _run_backup(hermes2)
+    r = _run_watchdog(hermes2)
     check(r.stdout.strip() == "",
           f"no vault configured -> still silent (got {r.stdout.strip()!r})")
+
+
+def test_wm_root_needs_no_git_repo_or_remote():
+    """WM_ROOT is not backed up by this script, so its git state is not news.
+
+    The old wm-backup-push.py refused to run at all unless WM_ROOT was a git
+    repo, and alerted every night if it had no 'origin'. Both were correct
+    then and would now be pure noise: the private remote is retired and
+    nothing here commits or pushes WM_ROOT. Asserted rather than assumed,
+    because "the watchdog got chattier" is exactly the regression that makes
+    people stop reading it.
+    """
+    td, root, _vault, hermes = _fixture(wm_is_git=False)
+    r = _run_watchdog(hermes)
+    check(r.returncode == 0, "a non-git WM_ROOT still exits 0")
+    check(r.stdout.strip() == "",
+          f"a non-git WM_ROOT is SILENT (got {r.stdout.strip()!r})")
+
+    # And a git WM_ROOT with no remote, which is the shape left behind after
+    # the private remote is deleted.
+    td2, root2, _v2, hermes2 = _fixture()
+    check(git(root2, "remote").stdout.strip() == "", "fixture WM_ROOT has no remote")
+    r = _run_watchdog(hermes2)
+    check(r.stdout.strip() == "",
+          f"WM_ROOT with no remote is SILENT (got {r.stdout.strip()!r})")
+
+
+def test_does_not_write_to_wm_root_git():
+    """It must not commit WM_ROOT — that job is gone, not merely quiet."""
+    td, root, _vault, hermes = _fixture()
+    before = git(root, "rev-parse", "HEAD").stdout.strip()
+    (root / "meta" / "lanes.json").write_text('{"c1": true}')
+    r = _run_watchdog(hermes)
+    check(r.stdout.strip() == "", f"an uncommitted change is not news (got {r.stdout!r})")
+    check(git(root, "rev-parse", "HEAD").stdout.strip() == before,
+          "no new commit was made in WM_ROOT")
+    check(git(root, "status", "--porcelain").stdout.strip() != "",
+          "and the change is left uncommitted, not staged away")
 
 
 def test_reports_quiet_failures():
@@ -139,7 +184,7 @@ def test_reports_quiet_failures():
                                 "outcome": outcome}) + "\n")
         f.write("not json at all\n")
 
-    r = _run_backup(hermes)
+    r = _run_watchdog(hermes)
     check("todoist create: 2 failure(s)" in r.stdout,
           f"recent failures reported, older ones not (got {r.stdout!r})")
     check("ok" not in r.stdout.split("failure(s)")[0].split("todoist")[0],
@@ -151,7 +196,7 @@ def test_reports_quiet_failures():
     (root2 / "logs" / f"{now:%Y-%m}.log").write_text(
         json.dumps({"ts": now.isoformat(timespec="seconds"), "component": "todoist",
                     "event": "create", "outcome": "ok"}) + "\n")
-    r = _run_backup(hermes2)
+    r = _run_watchdog(hermes2)
     check(r.stdout.strip() == "", f"no failures -> still silent (got {r.stdout!r})")
 
 
@@ -165,7 +210,7 @@ def test_prunes_old_logs():
     drop = logs / f"{(now - dt.timedelta(days=200)):%Y-%m}.log"
     keep.write_text("")
     drop.write_text("")
-    _run_backup(hermes)
+    _run_watchdog(hermes)
     check(keep.exists(), "the current log is kept")
     check(not drop.exists(), "a log older than the retention window is pruned")
 
@@ -177,16 +222,9 @@ def test_alerts_on_real_problems():
     (vault / "new.md").write_text("x")
     git(vault, "add", "-A")
     git(vault, "commit", "-q", "-m", "local only")
-    r = _run_backup(hermes)
+    r = _run_watchdog(hermes)
     check("unpushed local commits" in r.stdout,
           f"alerts on unpushed vault commits (got {r.stdout!r})")
-
-    # A missing remote means the off-box copy silently is not happening.
-    td2, root2, _v2, hermes2 = _fixture()
-    git(root2, "remote", "remove", "origin")
-    r = _run_backup(hermes2)
-    check("no 'origin' remote" in r.stdout,
-          f"alerts when the backup remote is gone (got {r.stdout!r})")
 
 
 def test_vault_pull_when_behind():
@@ -212,28 +250,20 @@ def test_vault_pull_when_behind():
     behind = git(vault, "rev-list", "--count", "HEAD..@{u}").stdout.strip()
     check(behind == "1", f"vault is genuinely 1 behind before the run (got {behind!r})")
 
-    r = _run_backup(hermes)
+    r = _run_watchdog(hermes)
     check(r.stdout.strip() == "", f"being behind is silent (got {r.stdout.strip()!r})")
     check((vault / "from-phone.md").exists(), "vault fast-forwarded automatically")
 
 
-def test_pushes_to_remote():
-    td, root, _vault, hermes = _fixture()
-    (root / "raw" / "2026-09.md").write_text("## 2026-09-01T00:00:00+05:30\n")
-    r = _run_backup(hermes)
-    check(r.stdout.strip() == "", f"push run is silent (got {r.stdout.strip()!r})")
-    log = git(td / "remote.git", "log", "--oneline", "-1").stdout
-    check("nightly snapshot" in log, f"commit reached the remote (got {log!r})")
-
-
 def main():
     test_silent_when_healthy()
+    test_wm_root_needs_no_git_repo_or_remote()
+    test_does_not_write_to_wm_root_git()
     test_reports_quiet_failures()
     test_prunes_old_logs()
     test_alerts_on_real_problems()
     test_vault_pull_when_behind()
-    test_pushes_to_remote()
-    print(f"ALL BACKUP TESTS PASSED ({checks} checks)")
+    print(f"ALL WATCHDOG TESTS PASSED ({checks} checks)")
 
 
 if __name__ == "__main__":
