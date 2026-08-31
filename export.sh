@@ -4,10 +4,10 @@
 #
 # Includes:
 #   - the package (working-memory-system/): source, SKILL.md, hook, scripts
-#     (rawlog.py, todoist.py, wm-backup-push.py,
-#     setup.sh, export.sh), spec, tests, backups/, and its .git history
-#   - the data (working-memory/): the raw transcript, meta/,
-#     refinement log, and its .git history (point-in-time recovery)
+#     (todoist.py, wm-backup-push.py, setup.sh, export.sh), spec, tests,
+#     backups/, and its .git history
+#   - the data (working-memory/): meta/, the refinement log, and its .git
+#     history (point-in-time recovery)
 #   - INSTALL-NOTES.txt: the per-install wiring values from THIS machine
 #
 # Excludes (transient or machine-local, regenerable on the target):

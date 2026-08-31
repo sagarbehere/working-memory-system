@@ -16,8 +16,10 @@ Run steps:
   5. Vault sync: git fetch + pull --ff-only when behind (devices push
      legitimately); alert only on unpushed local commits or a failed pull.
 
-What it backs up is now just the raw transcript, meta/, and the Todoist
-export: WM_ROOT holds no database and no reminder store (2026-08-29 cut).
+What it backs up is now just meta/ and the Todoist export: WM_ROOT holds
+no database, no reminder store (2026-08-29 cut) and no transcript
+(2026-08-31 cut). Scope is the whole directory generically, so it needs no
+change when the contents do.
 The vault is backed up by its own remote, which step 4 verifies.
 
 Exit 0 whenever the run completed; alerts are carried in stdout (the

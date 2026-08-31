@@ -16,7 +16,7 @@ echo "Data:    $WM_ROOT"
 echo "Hermes:  $HERMES_HOME"
 
 # 1. Data skeleton (spec Section 4: Storage layout)
-mkdir -p "$WM_ROOT/raw/archive" "$WM_ROOT/meta" "$WM_ROOT/logs"
+mkdir -p "$WM_ROOT/meta" "$WM_ROOT/logs"
 if [ ! -f "$WM_ROOT/meta/lanes.json" ]; then
   echo "{}" > "$WM_ROOT/meta/lanes.json"
 fi
@@ -104,11 +104,10 @@ echo "Hook installed: $HERMES_HOME/hooks/working-memory-debounce (symlink)"
 #       - wm-backup-push.py         -> nightly backup push to the private
 #         remote (watchdog: silent when healthy, alerts on failure; also
 #         reports anything that failed quietly and prunes old logs)
-#       - rawlog.py                 -> raw capture log CLI (owns the entry format)
 #       - todoist.py                -> Todoist client (the reminder layer)
 #     wmlib.py is NOT wrapped: it is imported by the others from the package
 #     directory, never executed on its own.
-WRAPPED_SCRIPTS="wm-backup-push.py rawlog.py todoist.py"
+WRAPPED_SCRIPTS="wm-backup-push.py todoist.py"
 mkdir -p "$HERMES_HOME/scripts"
 for s in $WRAPPED_SCRIPTS; do
   if [ -f "$PKG_DIR/$s" ]; then
@@ -135,7 +134,7 @@ echo "Wrapper scripts installed (exec package copies): $WRAPPED_SCRIPTS"
 #     resolves scripts from this directory — that is how a superseded script
 #     once stayed in the scheduler's path. Named explicitly, never a directory
 #     sweep: other projects keep their own scripts here.
-RETIRED_SCRIPTS="reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py"
+RETIRED_SCRIPTS="reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py"
 for s in $RETIRED_SCRIPTS; do
   target="$HERMES_HOME/scripts/$s"
   if [ -f "$target" ]; then

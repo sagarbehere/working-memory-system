@@ -192,8 +192,10 @@ class LockBusy(Exception):
 class FileLock:
     """flock-based mutual exclusion around a read-modify-write.
 
-    Used by the transcript append, where two simultaneous captures would
-    otherwise interleave a read (for the duplicate check) with a write.
+    NOTE: no caller in this package uses it as of the 2026-08-31 transcript
+    cut — its only user was the raw-log append. It is kept because the rule
+    below is the kind that gets rediscovered expensively, and because the
+    next read-modify-write on a shared file will need exactly this.
 
     It exists because an earlier design had two processes writing one store
     while only one of them took a lock: the unlocked writer's captures were
@@ -201,7 +203,7 @@ class FileLock:
     any file, both sides take the lock or neither is protected.
 
     Usage:
-        with FileLock(root / "meta" / "rawlog.lock"):
+        with FileLock(root / "meta" / "some.lock"):
             ...read, modify, write...
     """
 

@@ -65,14 +65,14 @@ else
 fi
 
 sec "3. Every script still imports and runs --help"
-for s in wmlib.py rawlog.py todoist.py wm-backup-push.py; do
+for s in wmlib.py todoist.py wm-backup-push.py; do
   if "$PY" -c "import py_compile,sys; py_compile.compile('$PKG_DIR/$s', doraise=True)" 2>/dev/null; then
     ok "compiles: $s"
   else
     bad "compiles: $s"
   fi
 done
-for s in rawlog.py todoist.py; do
+for s in todoist.py; do
   if "$PY" "$PKG_DIR/$s" --help >/dev/null 2>&1; then ok "CLI responds: $s --help"; else bad "CLI responds: $s --help"; fi
 done
 
@@ -81,18 +81,16 @@ WM_ROOT_LIVE="$("$PY" -c "import sys; sys.path.insert(0,'$PKG_DIR'); import wmli
 printf '  resolved WM_ROOT: %s\n' "$WM_ROOT_LIVE"
 if [ -d "$WM_ROOT_LIVE" ]; then
   ok "WM_ROOT exists"
-  printf '  raw files       : %s\n' "$(ls -1 "$WM_ROOT_LIVE/raw"/*.md 2>/dev/null | wc -l)"
   printf '  git status      : %s uncommitted file(s)\n' "$(git -C "$WM_ROOT_LIVE" status --porcelain 2>/dev/null | wc -l)"
 
-  # Does the live transcript still parse under the new reader? Entries
-  # captured before the cut carry [id: ...] headers and field lines.
-  if "$PY" "$PKG_DIR/rawlog.py" --root "$WM_ROOT_LIVE" search --limit 3 >/dev/null 2>&1; then
-    ok "live raw transcript parses (including pre-cut entries)"
-    printf '  transcript      : %s entries readable\n' \
-      "$("$PY" "$PKG_DIR/rawlog.py" --root "$WM_ROOT_LIVE" search --limit 0 2>/dev/null | wc -l)"
-  else
-    bad "live raw transcript does NOT parse — paste the error:"
-    "$PY" "$PKG_DIR/rawlog.py" --root "$WM_ROOT_LIVE" search --limit 3 2>&1 | head -5
+  # raw/ is NOT listed as a leftover to delete. The 2026-08-31 cut removed the
+  # code that wrote it, not the words it already holds: those are the user's
+  # own, they are the one thing no other store has, and this script is
+  # read-only by contract. Reported as an artifact to keep or archive
+  # deliberately — never swept.
+  if [ -d "$WM_ROOT_LIVE/raw" ]; then
+    printf '  raw/ (historic) : %s file(s) from before the transcript cut — kept, nothing writes here now\n' \
+      "$(ls -1 "$WM_ROOT_LIVE/raw"/*.md 2>/dev/null | wc -l | tr -d ' ')"
   fi
 
   # Files left behind by the 2026-08-29 cut (harmless, but flag them).
@@ -123,14 +121,14 @@ for p in "$HERMES_HOME/hooks/working-memory-debounce" \
 done
 echo "  wrapper scripts in $HERMES_HOME/scripts:"
 ls -1 "$HERMES_HOME/scripts" 2>/dev/null | sed 's/^/    /' || echo "    (none)"
-for w in rawlog.py todoist.py wm-backup-push.py; do
+for w in todoist.py wm-backup-push.py; do
   if [ -f "$HERMES_HOME/scripts/$w" ] && grep -q "Wrapper" "$HERMES_HOME/scripts/$w" 2>/dev/null; then
     ok "wrapper installed: $w"
   else
     bad "$w is missing or is a stale COPY, not a wrapper — re-run setup.sh"
   fi
 done
-for gone in reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py; do
+for gone in reminders.py records.py reminder-check.py wm-consolidation-gate.py cron-session-prune.py rawlog.py; do
   if [ -e "$HERMES_HOME/scripts/$gone" ]; then
     bad "$gone still present in ~/.hermes/scripts — DELETE it; it is a stale copy of removed code"
   else
