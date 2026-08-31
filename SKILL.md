@@ -17,9 +17,9 @@ client; you classify, file, retrieve, and remind.
 
 **This system keeps no copy of the raw message.** A capture goes straight to
 its destination — a vault note or a Todoist task — and those are the only
-records it creates. Recovery is the backups' job (the vault's own remote, the
-nightly push, the Todoist export). What the user actually *said* survives in
-Hermes' own session history, not here; see **Failure handling**.
+records it creates. Recovery is the vault's own git remote — push after every
+write, or the note exists on one machine only. What the user actually *said*
+survives in Hermes' own session history, not here; see **Failure handling**.
 
 **Read before operating:** `second-brain-schema.md` (the type/tag/status model
 — read this first), `working-memory-system-spec.md` (how this system files
@@ -82,7 +82,7 @@ already there, do not write it again — confirm with `↩︎` instead.
 | `reference` | vault `references/` | `subtype: entity` → `references/entities/`; `concept` → `references/concepts/`; `procedure` → `references/procedures/` |
 | `idea` | vault `ideas/` atomic note | freely linked, no status |
 | **artifact** (photo, PDF, scan) | leave the file where it already syncs; file a `record` note with `file_ref:` | Never copy the file into the vault. `file_ref` must be a **stable** location, never a path the user might reorganise (schema §9). If you only have a chat attachment and no durable path, say so and ask where it lives. |
-| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit). **Ticked items stay until the user asks to clear them** — never tidy unasked. When clearing, carry anything the item recorded into the log entry: once the line is gone, the log is the only remaining record short of a git diff, and it is append-only so the detail costs nothing there. "Removed 4 ticked items" loses "first nightly push succeeded, remote HEAD matches local"; say both. | substantial/multi-step → project note body |
+| **undated task** | Todoist **or** vault — one home only | quick one-off errand → Todoist task ONLY (no vault note); **project-scoped to-do → checklist line in that project's note** (`## Checklist` at the bottom, `- [ ] item`; append on capture, tick on "mark X done" or an Obsidian edit). **Ticked items stay until the user asks to clear them** — never tidy unasked. When clearing, carry anything the item recorded into the log entry: once the line is gone, the log is the only remaining record short of a git diff, and it is append-only so the detail costs nothing there. "Removed 4 ticked items" loses "renewed on the 12th, ref ABC-123"; say both. | substantial/multi-step → project note body |
 
 **Vault write discipline (all vault destinations):**
 
@@ -166,8 +166,10 @@ happens only when it comes up in conversation:
 - Condense a reference note when it has visibly sprawled and the user asks,
   or when you are already editing it. Do not go looking for work.
 
-The nightly backup watchdog reports anything that failed quietly and prunes
-old logs. It is not an agent job and costs no tokens.
+The nightly watchdog (`wm-watchdog.py`) reports anything that failed quietly,
+checks the vault is actually pushed, and prunes old logs. It is not an agent
+job and costs no tokens. It backs nothing up — which is why "commit AND push"
+above is not optional.
 
 ## Reminders (Todoist only)
 

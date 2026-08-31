@@ -27,13 +27,16 @@ tempted to put a rule in `SKILL.md`, first ask whether it belongs in a CLI.
 ## Where things live
 
 This repo is the **package**. The user's data lives in a separate directory
-(`WM_ROOT`, default `~/working-memory`), which is its own git repo pushed to a
-private remote. Never commit data into this repo.
+(`WM_ROOT`, default `~/working-memory`) — its own git repo, but since the
+2026-08-31 watchdog cut nothing commits or pushes it, and it holds no content
+worth backing up. The notes live in the **vault** (`WM_VAULT_PATH`), which has
+its own remote; that is the repo that matters. Never commit data into this
+repo.
 
 ```
 wmlib.py                  env parsing, timezone, logging, atomic writes, locking
 todoist.py                Todoist client + CLI — the reminder layer
-wm-backup-push.py         cron: nightly backup + health watchdog (silent when well)
+wm-watchdog.py            cron: nightly health watchdog (silent when well)
 hooks/working-memory-debounce/handler.py
                           the capture gate — monkey-patches Hermes' inbound seam
 SKILL.md                  the agent's policy (installed as a Hermes skill)
@@ -76,7 +79,7 @@ These exist because breaking them caused real bugs. Each is enforced by a test.
 2. **Timestamps: store aware, display local.** Everything shown to a user goes
    through `wmlib.local_iso()`. Never hardcode an offset or a zone;
    `wmlib.tz()` resolves `WM_TZ` or the system zone.
-3. **Watchdogs are silent when healthy.** `wm-backup-push.py` prints only
+3. **Watchdogs are silent when healthy.** `wm-watchdog.py` prints only
    problems; the no_agent scheduler delivers its stdout verbatim, so anything
    it prints reaches the user. An alert that fires on a healthy night trains
    the user to ignore it, so gate every alert on the relevant feature actually
@@ -102,13 +105,13 @@ asserted in `tests/test_todoist_budget.py`. Current steady state:
 | create a reminder (project id cached) | 1 (`POST /tasks`) |
 | create, cold cache | 2 (+ `GET /projects`, cached afterwards) |
 | "what's due" | 2 (`GET /projects`, `GET /tasks`) |
-| nightly backup export | 2 |
 | **anything else, including idling** | **0** |
 
-There is no polling loop: since the 2026-08-29 cut nothing contacts Todoist
-unless the agent is acting. Cost is proportional to use, not to time —
-roughly 2 calls a day at rest. **Do not reintroduce a periodic poll**; that
-is how this got to 288 requests/day before.
+There is no polling loop, and since the nightly Todoist export went with the
+2026-08-31 watchdog cut, **nothing contacts Todoist unless the agent is
+acting**. Cost is proportional to use, not to time — genuinely zero on a day
+you set no reminders. **Do not reintroduce a periodic poll**; that is how this
+got to 288 requests/day before.
 
 ## Cron and the wrapper model
 
@@ -122,9 +125,9 @@ effect immediately — no refresh step.
 stale copy waiting to happen — that exact situation once put a superseded
 script in the scheduler's path.
 
-Current scheduled work: exactly one job — `wm-backup-push.py`, a nightly
-Hermes `no_agent` entry. **No OS crontab entry, and nothing that invokes the
-agent.**
+Current scheduled work: exactly one job — `wm-watchdog.py`, a nightly Hermes
+`no_agent` entry. **No OS crontab entry, and nothing that invokes the agent.**
+It backs nothing up; it watches the vault's sync state and the failure log.
 
 ## Testing
 

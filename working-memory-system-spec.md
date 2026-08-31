@@ -66,7 +66,7 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 
 **Escalation path for edge cases:** SKILL.md is terse by design (Section 16) — it won't spell out every judgment call. It ends with a pointer to three things, each answering a different kind of question: this spec's file path (**why** the system works this way), the implementation source location (**how** it currently works), and `logs/` (**what actually happened** on a specific past run — e.g. "why didn't my reminder fire yesterday" needs logs, not the spec or code). This is a lookup capability, not genuine introspection — Hermes decides *whether* to escalate based on its own in-the-moment judgment of "does this look covered," which is inherently imperfect, but the pointer at least makes the right behavior available and instructed.
 
-**Net shape:** a capture gate on the shared adapter seam, two small modules (`wmlib`, `todoist`), one nightly backup watchdog, and one skill document for the judgment layer — all reusing infrastructure that already runs, with a documented escalation path back to this spec, the source, and the logs.
+**Net shape:** a capture gate on the shared adapter seam, two small modules (`wmlib`, `todoist`), one nightly health watchdog, and one skill document for the judgment layer — all reusing infrastructure that already runs, with a documented escalation path back to this spec, the source, and the logs.
 
 ---
 
@@ -74,7 +74,6 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 
 ```
 /working-memory/
-  todoist-export.jsonl       # nightly export of open Todoist tasks (their only off-box copy)
   logs/
     2026-08.log               # one file per month — diagnostic, not memory (Section 11)
   meta/
@@ -91,7 +90,7 @@ This is not "just a prompt to Hermes," and it's not "a pile of scripts with no a
 - An existing install may still hold a `raw/` directory from before that cut. Nothing reads or writes it; it is kept or archived at the user's discretion, and no tool in this package deletes it.
 - `logs/` records operational events, never content.
 - **Everything durable this system owns lives under this single `/working-memory/` directory.** A full backup is just archiving this one folder — but note that the *memories* are not in it.
-- **Backup:** a local git repo over `/working-memory/`, committing on each write, gives point-in-time recovery; `wm-backup-push.py` adds the off-box copy by pushing nightly to a private remote (see "Backup design" in the decisions doc).
+- **This directory is not backed up, deliberately (2026-08-31).** It was committed and pushed nightly to a private remote; that remote is retired and nothing automated commits here any more. What is left — `lanes.json`, diagnostics, a disposable cache — is cheap to lose and cheap to recreate. It is still a git repo, so a manual commit remains available. The notes are in the vault, which has its own remote; see `decisions.md`, "The 2026-08-31 watchdog cut".
 - **Timestamps:** every stored timestamp is timezone-aware; everything user-facing is rendered in `WM_TZ`, defaulting to the machine's zone. No component hardcodes an offset.
 
 ---
@@ -198,8 +197,10 @@ calls a day. Todoist's own reliability comfortably exceeds that.
   the reply, so the user can act on it.
 - **Recurrence** uses Todoist's own (`--due-string "every monday 9am"`); do
   not hand-roll regeneration.
-- **The nightly backup exports open tasks** to `todoist-export.jsonl`, which
-  is their only off-box copy.
+- **There is no local export of Todoist tasks.** A nightly one existed until
+  2026-08-31 and went with the backup half of the watchdog; Todoist's own
+  hosting is the copy. This is the one place where that cut removed a real
+  redundancy rather than a redundant one — see `decisions.md`.
 
 ---
 
@@ -248,7 +249,7 @@ For the first few weeks, briefly confirm what got filed after each processed buf
 ## 14. Open items for the implementer
 
 - Debounce duration (`WM_DEBOUNCE_SECONDS`, default 5s) is a starting guess — tune based on real usage.
-- **Off-box backup — resolved.** `wm-backup-push.py` commits and pushes `WM_ROOT` to a private remote nightly, exports open Todoist tasks alongside it, and doubles as the health watchdog. See `decisions.md`, "Backup design".
+- **Off-box backup of `WM_ROOT` — closed as not wanted (2026-08-31).** It was built (nightly commit + push to a private remote) and then removed once the directory no longer held anything worth the machinery. The vault, which does hold the notes, has always been backed up by its own remote — and `wm-watchdog.py` still checks nightly that it is actually pushed. See `decisions.md`.
 
 ---
 
@@ -313,6 +314,14 @@ Goal: let Hermes notice when SKILL.md or the underlying design has a gap, withou
   mechanism. Roughly half the code, and no scheduled job that invokes the
   agent. The reasoning is in `decisions.md`; the deleted code is recoverable
   from the tag `v3.0.0-full`.
+- **2026-08-31 — the watchdog cut.** `wm-backup-push.py` became
+  `wm-watchdog.py` and lost three of its five jobs: the Todoist export, the
+  `WM_ROOT` commit, and the push to a private remote. Those were the backup
+  half, and after the transcript cut they protected a directory holding
+  nothing the user minds losing. What survives is the health half — the
+  quiet-failure check and the vault sync check — plus log pruning. The
+  private remote is retired. The rename is deliberate: a file called
+  `wm-backup-push.py` that backs nothing up misleads its next reader.
 - **2026-08-31 — the transcript cut.** `rawlog.py` and the `raw/` log were
   removed. Every capture used to be appended there verbatim before anything
   was decided about it; now a capture goes straight to the vault or Todoist

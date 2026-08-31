@@ -10,6 +10,8 @@
 #     crontab -e      # then delete the line mentioning reminder-check.py
 #
 # The only remaining scheduled work is registered inside Hermes, not the OS
-# crontab: exactly one job, the nightly backup push (a plain-Python watchdog,
-# silent when healthy). Nothing schedules the agent. See README / setup.sh
+# crontab: exactly one job, wm-watchdog.py (a plain-Python health watchdog,
+# silent when healthy). It was called wm-backup-push.py until 2026-08-31, when
+# the backup half was removed — if your Hermes cron entry still names the old
+# script, re-point it. Nothing schedules the agent. See README / setup.sh
 # output.

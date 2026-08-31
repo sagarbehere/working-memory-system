@@ -4,7 +4,7 @@
 #
 # Includes:
 #   - the package (working-memory-system/): source, SKILL.md, hook, scripts
-#     (todoist.py, wm-backup-push.py, setup.sh, export.sh), spec, tests,
+#     (todoist.py, wm-watchdog.py, setup.sh, export.sh), spec, tests,
 #     backups/, and its .git history
 #   - the data (working-memory/): meta/, the refinement log, and its .git
 #     history (point-in-time recovery)
@@ -96,8 +96,8 @@ NOTES="$STAGE/INSTALL-NOTES.txt"
     echo "  6) Re-create the Hermes cron job — they live in Hermes\'s cron"
     echo "     store, not in this archive. Both are no_agent watchdogs; there"
     echo "     is deliberately NO job that invokes the agent. Ask your agent:"
-    echo "     \"recreate the nightly working-memory backup push job\""
-    echo "        (no_agent, 03:00 daily, script=wm-backup-push.py)."
+    echo "     \"recreate the nightly working-memory watchdog job\""
+    echo "        (no_agent, 03:00 daily, script=wm-watchdog.py)."
     echo "  7) Restart the gateway (from SSH):  hermes gateway restart"
     echo "  8) /reload-skills in Telegram so sessions pick up the skill."
     echo

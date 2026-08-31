@@ -115,9 +115,9 @@ This is a personal system, published because a few people asked. It assumes:
   and notes work fine but reminders are unavailable.
 - **An Obsidian vault that is a git repo** with a remote. Notes are written
   there and pushed after every write.
-- **A private git remote** for the data directory. It holds coordination state
-  and the nightly Todoist export rather than your notes, which live in the
-  vault — but it is small, and an off-box copy costs nothing.
+- Nothing else. The data directory (`~/working-memory/`) needs no remote: it
+  holds coordination state and diagnostics, not your notes, and nothing backs
+  it up on purpose.
 - Python 3.9+. Standard library only — no dependencies to install.
 
 If you want a version that works without Todoist, this is not it. One existed
@@ -148,9 +148,10 @@ Then:
 2. **Add your Todoist token** as `TODOIST_API_TOKEN` in `~/.hermes/.env` —
    Hermes' own secrets file, where your bot tokens already live. Secrets go
    there; everything else in the working-memory env file above.
-3. **Give the data directory a remote:**
-   `git -C ~/working-memory remote add origin <your-private-repo>`
-4. **Register one Hermes cron job**: `wm-backup-push.py`, nightly, `no_agent`.
+3. **Make sure your vault has a remote and you can push to it.** This is the
+   one backup that matters — it is where your notes are, and the watchdog
+   below exists to tell you when a note has not reached it.
+4. **Register one Hermes cron job**: `wm-watchdog.py`, nightly, `no_agent`.
    That is the only scheduled work — nothing invokes the agent on a timer, and
    there is no OS crontab entry.
 5. **Restart the gateway** so the hook loads: `hermes gateway restart` (from a
@@ -203,19 +204,23 @@ the bug.
 <your vault>/              # your memories — notes, synced by your own setup
   records/ projects/ references/ ideas/
 
-~/working-memory/          # bookkeeping — its own git repo, pushed nightly
+~/working-memory/          # bookkeeping — not backed up, nothing of yours here
   meta/lanes.json          #   which chats you reserved
   logs/                    #   operational log, pruned after 30 days
-  todoist-export.jsonl     #   nightly export of open tasks
 ```
 
 ---
 
 ## Health
 
-`wm-backup-push.py` runs nightly and prints nothing when all is well. Anything
-it does say is a real problem: a failed push, an unpushed vault commit, or
-something that has been failing quietly.
+`wm-watchdog.py` runs nightly and prints nothing when all is well. Anything it
+does say is a real problem: an unpushed vault commit, a vault pull that failed,
+or something that has been failing quietly.
+
+It backs nothing up. Its whole job is to notice when **your vault** — the only
+place your notes exist — has commits that never reached its remote. That is the
+failure this system is actually exposed to, and it is silent without a
+watchdog.
 
 ```bash
 python3 tests/run_all.py    # no network, no live data touched
