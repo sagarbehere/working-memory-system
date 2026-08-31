@@ -69,7 +69,7 @@ bot   ✅ → wiki (reference/entity): plumber
 
 ## How it works
 
-Four moving parts:
+Three moving parts:
 
 **1. A capture gate** (a Hermes hook) decides whether a message is memory input
 at all — because it is in a chat you reserved, or because it starts with
@@ -77,20 +77,13 @@ at all — because it is in a chat you reserved, or because it starts with
 messages are buffered for a few seconds, so three thoughts typed in a row
 become one turn rather than three.
 
-**2. A transcript.** Every capture is appended verbatim to a monthly markdown
-file before anything else happens. Nothing links to it and nothing is rebuilt
-from it. It exists so that no message is ever lost to a judgment call: if a
-message to the memory system is mis-filed — or judged to be chit-chat and not
-filed at all — its content is still saved in the transcript.
-
-**3. The agent** classifies and routes, following the policy in
+**2. The agent** classifies and routes, following the policy in
 [`SKILL.md`](SKILL.md). This is where the judgment lives: what kind of thing is
 this, and where does it belong.
 
-**4. A small set of tools** handles the mechanics — appending to the
-transcript, talking to Todoist, locking, backups. The agent calls them rather
-than reinventing each step, so a transcript entry and a Todoist call come out
-the same shape every time.
+**3. A small set of tools** handles the mechanics — talking to Todoist,
+timezones, backups. The agent calls them rather than reinventing each step, so
+every Todoist task comes out the same shape.
 
 Where things end up:
 
@@ -100,7 +93,13 @@ Where things end up:
 | A repeated measurement | One growing note per series, a line per entry |
 | A fact, decision, procedure, person, idea | A typed note in your Obsidian vault |
 | A quick errand | A Todoist task, and nowhere else |
-| Anything at all | The transcript, verbatim |
+
+**There is no fourth part holding a copy of what you said.** A capture goes to
+one of those destinations or nowhere; this system keeps no log of the raw
+message. Until 2026-08-31 it did, and [the reasoning for removing
+it](decisions.md) is worth reading before you add one back. Your words are not
+gone, though — they are in the chat, and Hermes indexes its own conversation
+history, which is what "did I ever say…" searches.
 
 ---
 
@@ -116,8 +115,9 @@ This is a personal system, published because a few people asked. It assumes:
   and notes work fine but reminders are unavailable.
 - **An Obsidian vault that is a git repo** with a remote. Notes are written
   there and pushed after every write.
-- **A private git remote** for the data directory, so an off-box copy of your
-  transcript exists.
+- **A private git remote** for the data directory. It holds coordination state
+  and the nightly Todoist export rather than your notes, which live in the
+  vault — but it is small, and an off-box copy costs nothing.
 - Python 3.9+. Standard library only — no dependencies to install.
 
 If you want a version that works without Todoist, this is not it. One existed
@@ -183,30 +183,30 @@ guessing.
 | `buy stamps` | Todoist task only — no note |
 | `what's due this week?` | Answered from Todoist, soonest first |
 | `what did I decide about the printer?` | Answered from the note |
-| `did I ever mention the taxi driver?` | Searches the transcript |
+| `did I ever mention the taxi driver?` | Searches your notes, then your chat history |
 | `that should be a project, not an idea` | Re-filed |
 | `mark the plumber task done` | Closed in Todoist |
 | `forget what I said about X` | Confirms, then removes the note and task |
 | `.` | Flush the buffer now instead of waiting for the debounce |
 
-Two things to know. **The transcript is never edited** — "forget X" removes
-what was *derived* from a message, and the agent will tell you the words
-remain. And **you should never see an approval prompt** during a capture; if
-you do, a tool is missing and that is the bug.
+Two things to know. **"forget X" reaches only what was filed** — the note and
+the task. The original message stays in your chat history like any other
+message; this system does not reach in there. And **you should never see an
+approval prompt** during a capture; if you do, a tool is missing and that is
+the bug.
 
 ---
 
 ## What is where
 
 ```
-~/working-memory/          # your data — its own git repo, pushed nightly
-  raw/2026-08.md           #   the transcript, one file per month
-  logs/                    #   operational log, pruned after 30 days
-  meta/lanes.json          #   which chats you reserved
-  todoist-export.jsonl     #   nightly export of open tasks
-
-<your vault>/              # notes, synced by your own setup
+<your vault>/              # your memories — notes, synced by your own setup
   records/ projects/ references/ ideas/
+
+~/working-memory/          # bookkeeping — its own git repo, pushed nightly
+  meta/lanes.json          #   which chats you reserved
+  logs/                    #   operational log, pruned after 30 days
+  todoist-export.jsonl     #   nightly export of open tasks
 ```
 
 ---
