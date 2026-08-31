@@ -28,9 +28,9 @@ import subprocess
 import sys
 
 PKG = pathlib.Path(__file__).resolve().parents[1]
-CLIS = ("rawlog.py", "todoist.py")
+CLIS = ("todoist.py",)
 
-# `rawlog.py search --text … [--since …]` inside backticks. Prose ellipses,
+# `todoist.py completed --since … --until …` inside backticks. Prose ellipses,
 # placeholders and [optional] brackets are all normal in these docs.
 INVOCATION = re.compile(r"`(" + "|".join(re.escape(c) for c in CLIS) + r")\s+([^`]*)`")
 
@@ -69,6 +69,8 @@ def main():
     known_subs = {c: subcommands(c) for c in CLIS}
     for c, subs in known_subs.items():
         check(len(subs) >= 2, f"{c} advertises its subcommands (got {sorted(subs)})")
+    # rawlog.py was the second CLI here until the 2026-08-31 cut. If a doc ever
+    # cites it again the vestigial-reference guard catches that, not this one.
 
     flag_cache = {}
     bad = []
@@ -107,7 +109,7 @@ def main():
         print("the capability it describes — but they must not disagree.")
         sys.exit(1)
 
-    check(seen >= 10, f"found a plausible number of invocations (got {seen})")
+    check(seen >= 5, f"found a plausible number of invocations (got {seen})")
     print(f"DOCUMENTED CLI CALLS OK ({seen} invocations across "
           f"{len(CLIS)} CLIs, {checks} checks)")
 

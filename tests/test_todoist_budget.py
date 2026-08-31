@@ -101,12 +101,22 @@ def test_read_costs():
     check(calls == ["GET projects", "GET tasks"], f"list is 2 calls (got {calls})")
 
 
-def test_nothing_happens_without_a_capture():
-    """No cron polls Todoist any more; calls happen only when the agent acts."""
+def test_nothing_happens_without_an_action():
+    """Loading the client costs nothing; calls happen only when asked for.
+
+    Until the 2026-08-31 cut this ran `rawlog.py add` — the one capture path
+    that was a CLI in this package — to prove a non-reminder capture cost zero
+    Todoist calls. Captures no longer go through any CLI here (they are vault
+    writes made by the agent), so there is nothing left to invoke for that.
+
+    What remains checkable is the invariant most likely to be broken by an
+    edit: that merely starting todoist.py does no work. A project-id lookup or
+    a cache warm at import or parse time would be invisible in normal use and
+    would put the budget back on a per-invocation footing.
+    """
     td = _fixture()
-    _r, calls = _run(td, str(PKG / "rawlog.py"), "--root", str(td / "wm"),
-                     "add", "--text", "a plain thought, not a reminder")
-    check(calls == [], f"a non-reminder capture makes NO API calls (got {calls})")
+    _r, calls = _run(td, str(PKG / "todoist.py"), "--help")
+    check(calls == [], f"starting the client makes NO API calls (got {calls})")
 
 
 def test_disabled_makes_no_calls():
@@ -120,7 +130,7 @@ def test_disabled_makes_no_calls():
 def main():
     test_reminder_cost()
     test_read_costs()
-    test_nothing_happens_without_a_capture()
+    test_nothing_happens_without_an_action()
     test_disabled_makes_no_calls()
     print(f"ALL TODOIST BUDGET TESTS PASSED ({checks} checks)")
 

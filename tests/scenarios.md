@@ -1,7 +1,8 @@
 # Scenario checklist — the manual half
 
 `tests/run_all.py` proves the deterministic layer works: the gate sees the
-right messages, the transcript round-trips, the watchdogs stay quiet. It says
+right messages, the Todoist client stays inside its call budget, the
+watchdogs stay quiet. It says
 **nothing** about whether the agent then classified and filed the thing
 sensibly, because that is an LLM judgment and there is no cheap deterministic
 test for it.
@@ -32,7 +33,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 
 | Say | Expect |
 |---|---|
-| `printer is out of ink` *(in the lane)* | Filed. Confirmation starts `✅ →` and names the destination. Appears verbatim in `raw/`. |
+| `printer is out of ink` *(in the lane)* | Filed. Confirmation starts `✅ →` and names the destination. |
 | `Hey memory printer is out of ink` *(outside the lane)* | Same, and the marker is **not** part of the stored text. |
 | `remind me Tuesday at 8am to call the plumber` | A Todoist task, due Tue 08:00 **in your timezone**. Confirmation says Todoist. |
 | `BP 128/82 this morning` | Appended as ONE line to the blood-pressure series note — not a new note per reading. |
@@ -50,10 +51,10 @@ better, because it makes the mistake impossible), or a wrong expectation
 | Ask | Expect |
 |---|---|
 | `Hey memory what's due this week?` | Answered from Todoist, soonest first. |
-| `Hey memory what did I decide about the printer?` | Answered from the vault note, not by dumping the transcript. |
+| `Hey memory what did I decide about the printer?` | Answered from the vault note. |
 | `Hey memory what's my BP been doing?` | Reads the series note and **summarises the trend** — it should reason over the numbers, not list them. |
 | `Hey memory do my headaches follow bad sleep?` | A correlational answer across the series note. This is the case a database could not have answered; if it just quotes lines, the skill is under-using the file. |
-| `Hey memory did I ever mention the taxi driver?` | Falls back to `rawlog.py search`. Finds it even if it was never filed anywhere. |
+| `Hey memory did I ever mention the taxi driver?` | Searches the vault; if it is not there, falls back to `session_search` over the chat history and **says which one answered**. Since 2026-08-31 this is the only path to something never filed, and it is the one behaviour here that depends on a store this repo does not own. |
 | `Hey memory what did I finish last month?` | Todoist completion history, grouped sensibly. |
 
 ## Corrections and commands
@@ -64,7 +65,7 @@ better, because it makes the mistake impossible), or a wrong expectation
 | Ask for something the wiki already covers | `↩︎ already filed → …`, naming the existing page or line. A `✅ →` here is a bug: it claims a write that did not happen. |
 | `mark the plumber task done` | Closed in Todoist. |
 | `clear the completed items off the X checklist` | Only ticked items go. The log entry names each one **and carries any detail the line held** — the line is gone, so the log is the record. Ticked items are never cleared unasked. |
-| `forget what I said about the taxi driver` | **Confirms first.** Then removes the derived note/task — and says plainly that the transcript still has the words. |
+| `forget what I said about the taxi driver` | **Confirms first.** Then removes the note/task it filed. Does not claim every trace is gone — the original message is still in the chat history. |
 | `reserve for memory` *(in a new chat)* | Confirms; that chat now captures without a marker. |
 | `release for memory` | Confirms; the chat returns to ordinary conversation. |
 

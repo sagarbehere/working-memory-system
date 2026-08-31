@@ -29,7 +29,6 @@ TESTS = PKG / "tests"
 # list silently misaligns the moment someone adds a longer name.
 SUITES = [
     ("wmlib", "test_wmlib.py"),
-    ("raw transcript", "test_rawlog.py"),
     ("todoist budget", "test_todoist_budget.py"),
     ("capture gate", "test_gate.py"),
     ("gate cases", "test_gate_cases.py"),

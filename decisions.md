@@ -136,7 +136,7 @@ implicit in a design diagram. **If you turn session pruning on, this cut is
 what makes that a data-loss decision rather than a housekeeping one.**
 
 **Reversibility.** This is a code deletion, not a data deletion, and the two
-are not comparable. `git checkout <sha>^ -- rawlog.py tests/test_rawlog.py`
+are not comparable. `git checkout e0b0213^ -- rawlog.py tests/test_rawlog.py`
 brings the component back in full, and `raw/` directories on existing installs
 were deliberately left in place — the code went, not the words already
 written. Nothing in this cut destroys anything, which is precisely why it did

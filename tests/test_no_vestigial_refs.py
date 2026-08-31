@@ -40,6 +40,8 @@ REMOVED = {
     "wm-consolidation-gate.py": "the nightly gate; nothing schedules the agent",
     "cron-session-prune.py": "pruned sessions the deleted nightly job created",
     "WM_RAW_RETENTION_DAYS": "raw rotation; search reads the archive anyway",
+    "rawlog.py": "the raw capture log CLI (2026-08-31 cut)",
+    "rawlog.lock": "the transcript append lock; there is no transcript",
 }
 
 # Exemptions. Map file -> "*" (whole file) or a set of specific tokens, so
@@ -55,13 +57,18 @@ ALLOWED = {
     "verify-on-vps.sh": {"reminders.py", "records.py", "reminder-check.py",
                          "records.db", "reminders.json", "records-snapshot.db",
                          "tag-index.json", "wm-consolidation-gate.py",
-                         "cron-session-prune.py"},
+                         "cron-session-prune.py", "rawlog.py"},
     "setup.sh": {"records.db", "reminders.json", "records-snapshot.db",
                  "reminder-check.py", "reminders.py", "records.py",
-                 "wm-consolidation-gate.py", "cron-session-prune.py"},
+                 "wm-consolidation-gate.py", "cron-session-prune.py",
+                 "rawlog.py"},
     "crontab.example": {"reminder-check.py"},
-    # Strips field lines from entries written before the cut; must name them.
-    "rawlog.py": {"record_kind"},
+    # These two explain, in their docstrings, the removed thing that motivated
+    # them. Named per-token so the rest of the guard still applies to them —
+    # test_documented_cli.py shipped with an unexempted mention that went
+    # unnoticed only because the file was still untracked when the suite ran.
+    "tests/test_documented_cli.py": {"rawlog.py", "wm-consolidation-gate.py"},
+    "tests/test_todoist_budget.py": {"rawlog.py"},
 }
 
 
@@ -187,6 +194,9 @@ def main():
     check(not (PKG / "reminders.py").exists(), "reminders.py is really gone")
     check(not (PKG / "records.py").exists(), "records.py is really gone")
     check(not (PKG / "reminder-check.py").exists(), "reminder-check.py is really gone")
+    check(not (PKG / "rawlog.py").exists(), "rawlog.py is really gone")
+    check(not (PKG / "tests" / "test_rawlog.py").exists(),
+          "test_rawlog.py is really gone")
     print(f"NO VESTIGIAL REFERENCES ({scanned} files scanned, "
           f"{len(REMOVED)} tokens, all §refs resolve, {checks} checks)")
 

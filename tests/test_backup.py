@@ -149,8 +149,8 @@ def test_reports_quiet_failures():
     td2, root2, _v2, hermes2 = _fixture()
     (root2 / "logs").mkdir(exist_ok=True)
     (root2 / "logs" / f"{now:%Y-%m}.log").write_text(
-        json.dumps({"ts": now.isoformat(timespec="seconds"), "component": "rawlog",
-                    "event": "add", "outcome": "ok"}) + "\n")
+        json.dumps({"ts": now.isoformat(timespec="seconds"), "component": "todoist",
+                    "event": "create", "outcome": "ok"}) + "\n")
     r = _run_backup(hermes2)
     check(r.stdout.strip() == "", f"no failures -> still silent (got {r.stdout!r})")
 
