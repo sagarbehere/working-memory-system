@@ -50,12 +50,26 @@ def model_status(text):
 
 
 def vault_status(text):
-    """Whatever three status values the vault declares — not the ones we hope
-    for. Matching the expected literal would report drift as "cannot parse",
-    which sends the reader looking for a formatting bug instead of the real
-    disagreement."""
+    """Whatever status values the vault declares — not the ones we hope for.
+    Matching the expected literal would report drift as "cannot parse", which
+    sends the reader looking for a formatting bug instead of the real
+    disagreement.
+
+    Two shapes have existed. The vault first declared them inline as
+    ``status: a | b | c``; wiki commit 0352cbb (2026-09-01) split that into a
+    bulleted definition list so each value could carry its own behaviour, and
+    this check went blind until it learned the second shape. Both are read,
+    because the point is the vocabulary, not the layout.
+    """
     m = re.search(r"status: (\w+) \| (\w+) \| (\w+)", text)
-    return set(m.groups()) if m else set()
+    if m:
+        return set(m.groups())
+    # Bulleted form: a `status:` intro paragraph, then one `- \`value\`` per
+    # status, ending at the next bold paragraph or heading.
+    sec = re.search(r"^`status:`.*?$(.*?)(?=^\*\*|^#)", text, re.M | re.S)
+    if not sec:
+        return set()
+    return set(re.findall(r"^- `(\w+)`", sec.group(1), re.M))
 
 
 def main():
@@ -80,8 +94,11 @@ def main():
 
     ms, vs = model_status(model), vault_status(vault)
     if not ms or not vs:
-        problems.append(f"could not extract status values "
-                        f"(model={sorted(ms)}, vault={sorted(vs)})")
+        problems.append(
+            f"could not extract status values (model={sorted(ms)}, "
+            f"vault={sorted(vs)}) — the declaration was reformatted, so this "
+            "check has gone blind. This is a PARSER problem, not drift: fix "
+            "the extractor here, do not edit either document to suit it")
     elif ms != vs:
         problems.append(f"status values differ: model={sorted(ms)} vault={sorted(vs)}")
 
