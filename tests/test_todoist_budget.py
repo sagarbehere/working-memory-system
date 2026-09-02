@@ -33,15 +33,18 @@ def check(cond, label):
 
 
 FAKE_CURL = r"""#!/bin/bash
-url=""; meth="GET"; nxt=0
+url=""; meth="GET"; nxt=0; data=""; data_nxt=0
 for a in "$@"; do
   if [ $nxt = 1 ]; then meth="$a"; nxt=0; fi
-  case "$a" in -X) nxt=1;; https://*) url="$a";; esac
+  if [ $data_nxt = 1 ]; then data="$a"; data_nxt=0; fi
+  case "$a" in -X) nxt=1;; -d) data_nxt=1;; https://*) url="$a";; esac
 done
 echo "$meth ${url##*/api/v1/}" >> "$CALL_LOG"
+if [ "$meth" = POST ] && [[ "$url" == */tasks ]]; then echo "$data" >> "$PAYLOAD_LOG"; fi
 case "$meth $url" in
   *"/projects"*) [ "$meth" = POST ] && echo '{"id":"P1","name":"Hermes"}' || echo '{"results":[{"id":"P1","name":"Hermes"}]}';;
-  "POST "*"/tasks") echo '{"id":"T77","content":"x","due":null,"completed_at":null}';;
+  "POST "*"/tasks") echo '{"id":"T77","content":"x","labels":["work","client"],"due":null,"completed_at":null}';;
+  "GET "*"/tasks/T77") echo '{"id":"T77","content":"x","labels":["work","client"],"completed_at":null}';;
   *"/tasks"*) echo '{"results":[{"id":"T77","content":"x"}]}';;
   *) echo '{}';;
 esac
@@ -67,6 +70,7 @@ def _env(td):
     e["PATH"] = f"{td / 'bin'}{os.pathsep}{e['PATH']}"
     e["HERMES_HOME"] = str(td / "hermes")
     e["CALL_LOG"] = str(td / "calls.log")
+    e["PAYLOAD_LOG"] = str(td / "payloads.log")
     e.pop("WM_ROOT", None)
     return e
 
@@ -92,6 +96,29 @@ def test_reminder_cost():
     check(calls == ["POST tasks"],
           f"warm create makes ONE call — project id cached (got {calls})")
     check(json.loads(r.stdout)["id"], "and still returns the task")
+
+
+def test_labels_are_sent_with_create():
+    """Repeated --label arguments become the API's top-level labels list."""
+    td = _fixture()
+    r, calls = _run(td, str(PKG / "todoist.py"), "create", "--content", "review NDA",
+                    "--label", "work", "--label", "client")
+    check(r.returncode == 0, f"labelled create ok ({r.stderr})")
+    check(calls == ["GET projects", "POST tasks"],
+          f"labelled create retains the normal call budget (got {calls})")
+    payload = json.loads((td / "payloads.log").read_text().strip())
+    check(payload["labels"] == ["work", "client"],
+          f"labels are sent intact (got {payload})")
+    created = json.loads(r.stdout)
+    check(created["labels"] == ["work", "client"],
+          f"create returns labels (got {created})")
+
+    r, calls = _run(td, str(PKG / "todoist.py"), "get", "--id", "T77")
+    check(r.returncode == 0, f"get ok ({r.stderr})")
+    check(calls == ["GET tasks/T77"], f"get is one task call (got {calls})")
+    fetched = json.loads(r.stdout)
+    check(fetched["labels"] == ["work", "client"],
+          f"get returns labels (got {fetched})")
 
 
 def test_read_costs():
@@ -149,6 +176,7 @@ def test_switch_off_makes_no_calls():
 
 def main():
     test_reminder_cost()
+    test_labels_are_sent_with_create()
     test_read_costs()
     test_nothing_happens_without_an_action()
     test_no_token_makes_no_calls()

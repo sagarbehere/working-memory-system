@@ -178,8 +178,13 @@ This pass does routing (capture/question/command) and, for captures, classificat
 
 **Todoist is the reminder mechanism.** The agent creates the task directly
 (`todoist.py create --content … --due …`); Todoist owns the due date,
-recurrence, completion state, and the notification to every device. Nothing
-fires from this machine, and there is no local reminder store.
+recurrence, completion state, labels, and the notification to every device.
+Nothing fires from this machine, and there is no local reminder store.
+
+An explicit “tag it as X” maps to Todoist label `X` (`--label X`; repeat for
+multiple labels). The label is part of the create request: if Todoist rejects
+it, the task does not exist and the agent reports the failure rather than
+creating an unlabelled task.
 
 **Why (2026-08-29 cut).** v3 originally kept `reminders.json` plus a
 five-minute cron tick as a durable firing layer, with Todoist as a mirror.

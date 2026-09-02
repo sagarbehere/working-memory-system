@@ -173,7 +173,7 @@ def forget_cached_project():
 
 
 def create_task(content, due=None, due_string=None, project=None, parent=None,
-                tok=None, project_id_=None):
+                tok=None, project_id_=None, labels=None):
     """Create one task; returns the API's task dict.
 
     project_id_ lets a batch caller resolve the project once instead of
@@ -184,6 +184,8 @@ def create_task(content, due=None, due_string=None, project=None, parent=None,
     body = {"content": content, "project_id": pid}
     if parent:
         body["parent_id"] = parent
+    if labels:
+        body["labels"] = labels
     if due:
         body["due_datetime"] = due
     elif due_string:
@@ -209,6 +211,8 @@ def main():
     s.add_argument("--due", help="ISO-8601 datetime, e.g. 2026-08-29T09:00:00+05:30")
     s.add_argument("--due-string", help="natural language, e.g. 'friday 9am'")
     s.add_argument("--parent", help="parent task id (creates a subtask)")
+    s.add_argument("--label", dest="labels", action="append", default=[],
+                   help="Todoist label; repeat for multiple labels")
     s.add_argument("--project", default=None, help="project name (default: TODOIST_PROJECT or 'Hermes')")
 
     l = sub.add_parser("list")
@@ -242,9 +246,11 @@ def main():
         print(ensure_project(args.name or default_proj))
     elif args.cmd == "create":
         task = create_task(args.content, due=args.due, due_string=args.due_string,
-                           project=args.project or default_proj, parent=args.parent)
+                           project=args.project or default_proj, parent=args.parent,
+                           labels=args.labels)
         print(json.dumps({"id": task["id"], "content": task["content"],
-                          "due": task.get("due"), "completed_at": task.get("completed_at")}))
+                          "labels": task.get("labels") or [], "due": task.get("due"),
+                          "completed_at": task.get("completed_at")}))
     elif args.cmd == "list":
         projects_by_id = {p["id"]: p["name"] for p in projects()}
         tasks = (_req("GET", "tasks") or {}).get("results", [])
@@ -330,6 +336,7 @@ def main():
     elif args.cmd == "get":
         t = _req("GET", f"tasks/{args.id}")
         print(json.dumps({"id": t["id"], "content": t["content"],
+                          "labels": t.get("labels") or [],
                           "completed_at": t.get("completed_at")}))
     return 0
 

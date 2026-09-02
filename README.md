@@ -186,6 +186,7 @@ guessing.
 | `remind me Friday 9am to renew the passport` | Todoist task, due Friday 09:00 |
 | `every monday 9am water the plants` | Recurring Todoist task |
 | `buy stamps` | Todoist task only — no note |
+| `review NDA of client and tag it as work` | Todoist task with the `work` label |
 | `what's due this week?` | Answered from Todoist, soonest first |
 | `what did I decide about the printer?` | Answered from the note |
 | `did I ever mention the taxi driver?` | Searches your notes, then your chat history |

@@ -195,6 +195,16 @@ from this machine, and there is no local reminder store.
 python3 ~/.hermes/scripts/todoist.py create --content <text> --due <ISO-8601 with offset>
 ```
 
+For an explicit Todoist label, add `--label <name>`; repeat it for several
+labels. Treat “tag it as work” as a Todoist label request, for example:
+
+```
+python3 ~/.hermes/scripts/todoist.py create --content "Review NDA of client" --label work
+```
+
+Todoist validates label names. If it rejects one, the task was not created:
+report that plainly rather than silently dropping the label.
+
 Use `--due-string "friday 9am"` instead when the user's own phrasing is
 natural language and unambiguous, and `--due-string "every monday 9am"` for
 anything recurring — Todoist owns recurrence, so never hand-roll the next
