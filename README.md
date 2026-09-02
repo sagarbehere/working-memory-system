@@ -143,7 +143,7 @@ existing config.
 Then:
 
 1. **Edit** `~/.hermes/working-memory.env` — at minimum `WM_VAULT_PATH` (your
-   vault), `TODOIST_MIRROR_ENABLED=true`, and `WM_TZ` if it differs from the
+   vault), `TODOIST_ENABLED=true`, and `WM_TZ` if it differs from the
    machine's zone. Optional: `WM_VAULT_SKILL=<skill-name>` layers a personal
    vault-operation skill (loaded via `skill_view` when a capture routes to
    the vault — e.g. your own wiki skill with device/sync preferences);

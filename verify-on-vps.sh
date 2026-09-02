@@ -111,7 +111,7 @@ if "$PY" -c "import sys; sys.path.insert(0,'$PKG_DIR'); import todoist; sys.exit
     "$PY" "$PKG_DIR/todoist.py" list 2>&1 | head -3 | sed 's/^/    /'
   fi
 else
-  skip "Todoist not enabled (TODOIST_MIRROR_ENABLED / TODOIST_API_TOKEN)"
+  skip "Todoist not enabled (TODOIST_ENABLED / TODOIST_API_TOKEN)"
 fi
 
 sec "6. Installed wiring (symlinks, wrappers, cron)"

@@ -57,7 +57,7 @@ def _fixture():
     curl.write_text(FAKE_CURL)
     curl.chmod(0o755)
     (td / "hermes" / "working-memory.env").write_text(
-        f"WM_ROOT={td / 'wm'}\nTODOIST_MIRROR_ENABLED=true\nTODOIST_PROJECT=Hermes\n")
+        f"WM_ROOT={td / 'wm'}\nTODOIST_ENABLED=true\nTODOIST_PROJECT=Hermes\n")
     (td / "hermes" / ".env").write_text("TODOIST_API_TOKEN=faketoken\n")
     return td
 
@@ -119,7 +119,7 @@ def test_nothing_happens_without_an_action():
     check(calls == [], f"starting the client makes NO API calls (got {calls})")
 
 
-def test_disabled_makes_no_calls():
+def test_no_token_makes_no_calls():
     td = _fixture()
     (td / "hermes" / ".env").write_text("")           # no token at all
     r, calls = _run(td, str(PKG / "todoist.py"), "list")
@@ -127,11 +127,32 @@ def test_disabled_makes_no_calls():
     check(r.returncode == 2, "and exits 2 (not configured), distinct from a failure")
 
 
+def test_switch_off_makes_no_calls():
+    """TODOIST_ENABLED=false is a real off switch, not just a verify-script hint.
+
+    The token can outlive the intent — it lives in Hermes' shared secrets file
+    — so the flag has to be what stops the calls. Before the gate moved into
+    main(), only verify-on-vps.sh consulted it and `create` ran regardless.
+    Every subcommand is checked because a half-on state would make the budget
+    depend on which verb you used.
+    """
+    for cmd in (["list"], ["create", "--content", "a"], ["get", "--id", "T77"]):
+        td = _fixture()
+        (td / "hermes" / "working-memory.env").write_text(
+            f"WM_ROOT={td / 'wm'}\nTODOIST_ENABLED=false\nTODOIST_PROJECT=Hermes\n")
+        r, calls = _run(td, str(PKG / "todoist.py"), *cmd)
+        check(calls == [], f"{cmd[0]} makes no calls when switched off (got {calls})")
+        check(r.returncode == 2, f"{cmd[0]} exits 2 when switched off")
+        check("TODOIST_ENABLED" in r.stderr,
+              f"{cmd[0]} names the flag, not the token (got {r.stderr!r})")
+
+
 def main():
     test_reminder_cost()
     test_read_costs()
     test_nothing_happens_without_an_action()
-    test_disabled_makes_no_calls()
+    test_no_token_makes_no_calls()
+    test_switch_off_makes_no_calls()
     print(f"ALL TODOIST BUDGET TESTS PASSED ({checks} checks)")
 
 

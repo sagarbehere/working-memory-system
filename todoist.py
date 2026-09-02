@@ -4,8 +4,9 @@
 Deterministic API client for the Todoist API v1 (api.todoist.com/api/v1/).
 Uses curl (subprocess) rather than urllib — Cloudflare's edge resets urllib's
 TLS handshake. Stdlib only. Token: TODOIST_API_TOKEN in ~/.hermes/.env.
-Project + enable flags: TODOIST_PROJECT / TODOIST_MIRROR_ENABLED in
-~/.hermes/working-memory.env.
+Project + enable flags: TODOIST_PROJECT / TODOIST_ENABLED in
+~/.hermes/working-memory.env. The flag gates every subcommand, so switching
+it off means this module makes no API calls at all.
 
 Commands: ensure-project | create | list | close | delete | get
 
@@ -41,6 +42,10 @@ class TodoistNotConfigured(TodoistError):
     """No API token — Todoist is optional, so callers may treat this as 'skip'."""
 
 
+class TodoistDisabled(TodoistNotConfigured):
+    """A token exists but TODOIST_ENABLED is not true — switched off on purpose."""
+
+
 def token(required: bool = True):
     """The API token, or None when unset and required=False.
 
@@ -55,12 +60,29 @@ def token(required: bool = True):
     return tok or None
 
 
+def _flag_set() -> bool:
+    return wmlib.wm_env().get("TODOIST_ENABLED", "false").strip().lower() == "true"
+
+
 def enabled() -> bool:
-    """True when a token exists AND TODOIST_MIRROR_ENABLED=true."""
-    return bool(
-        wmlib.hermes_env().get("TODOIST_API_TOKEN", "").strip()
-        and wmlib.wm_env().get("TODOIST_MIRROR_ENABLED", "false").strip().lower() == "true"
-    )
+    """True when a token exists AND TODOIST_ENABLED=true. Never raises."""
+    return bool(wmlib.hermes_env().get("TODOIST_API_TOKEN", "").strip()) and _flag_set()
+
+
+def require_enabled() -> None:
+    """Raise unless the reminder layer is switched on.
+
+    Two keys in two files, so two distinct errors: the token is a credential
+    living with Hermes' other secrets, the flag is this system's intent.
+    Reporting both as one "not configured" sends you to the wrong file half
+    the time. Callers that must stay quiet when Todoist is simply off should
+    ask enabled() instead.
+    """
+    token()  # raises TodoistNotConfigured when the credential is missing
+    if not _flag_set():
+        raise TodoistDisabled(
+            f"TODOIST_ENABLED is not true in {HERMES_HOME}/working-memory.env "
+            "— the reminder layer is switched off")
 
 
 def default_project() -> str:
@@ -178,7 +200,7 @@ def create_task(content, due=None, due_string=None, project=None, parent=None,
 
 
 def main():
-    p = argparse.ArgumentParser(description="Todoist mirror helper (API v1)")
+    p = argparse.ArgumentParser(description="Todoist reminder helper (API v1)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ensure-project").add_argument("--name", default=None)
@@ -211,6 +233,8 @@ def main():
     g.add_argument("--id", required=True)
 
     args = p.parse_args()
+
+    require_enabled()  # every subcommand talks to the API; none is free
 
     default_proj = default_project()
 
