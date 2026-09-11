@@ -54,6 +54,10 @@ Design docs, in the order worth reading:
 3. `decisions.md` — decisions and rejected
    alternatives: why things are as they are, and what is absent on purpose.
    Deliberately not a description of the system.
+4. `automatic-memory-design.md` — a **thought experiment**, not the system:
+   what automatic capture/recall and cross-agent memory would take, and an
+   evaluation of adopting Second Brain (thesecondbrain.dev) instead. Nothing
+   in it is built or decided; when something is, it moves to `decisions.md`.
 
 ## Where to look, by task
 
