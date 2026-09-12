@@ -70,7 +70,7 @@ already there, do not write it again — confirm with `↩︎` instead.
   action → `record`; open question/decision → `project`; "how do I"/stable
   entity → `reference`; musing/quote → `idea`; decision-time analysis →
   `reference`/concept if worth rereading, else project support material;
-  puzzle → `reference` with difficulty/subject as domain tags.
+  puzzle → `reference` with `difficulty` and `subject` as frontmatter facets, not tags.
   **Low confidence → `record`.**
 
 | `type` | Destination | Mechanism |
@@ -105,8 +105,9 @@ already there, do not write it again — confirm with `↩︎` instead.
   than merges if the tree is dirty or diverged — resolve before operating.
 - Two things that file asks for and that are easy to skip under time pressure:
   **search for an existing page first** (extending beats a near-duplicate),
-  and **update `index.md` and `log.md`** — a page missing from the index is
-  invisible to retrieval, since the index is where lookups start.
+  provide the vault-required `summary:` and `summary_updated:`, then run its
+  index builder. The generated `index.md`, authored `browse.md`, and `log.md`
+  must all reflect the write; see the vault's SCHEMA.md for the exact contract.
 - **Commit AND push in the vault after every write** — a local-only commit in
   a syncing repo is not backed up.
 - **Optional personal overlay.** If `WM_VAULT_SKILL` in

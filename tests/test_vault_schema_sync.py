@@ -18,6 +18,7 @@ check on the box where both live.
 
 Run: python3 tests/test_vault_schema_sync.py   (from the package dir)
 """
+import json
 import pathlib
 import re
 import sys
@@ -66,7 +67,8 @@ def vault_status(text):
         return set(m.groups())
     # Bulleted form: a `status:` intro paragraph, then one `- \`value\`` per
     # status, ending at the next bold paragraph or heading.
-    sec = re.search(r"^`status:`.*?$(.*?)(?=^\*\*|^#)", text, re.M | re.S)
+    sec = re.search(r"^.*?(?:`status:`|exactly one status:).*?$(.*?)(?=^##)",
+                    text, re.M | re.S)
     if not sec:
         return set()
     return set(re.findall(r"^- `(\w+)`", sec.group(1), re.M))
@@ -101,6 +103,22 @@ def main():
             "the extractor here, do not edit either document to suit it")
     elif ms != vs:
         problems.append(f"status values differ: model={sorted(ms)} vault={sorted(vs)}")
+
+    # Working Memory is a vault writer. These are not type-model assertions;
+    # they are the narrow construction contract it must satisfy when this
+    # particular vault is configured. Read the machine schema, rather than
+    # matching prose or copying the vault's entire rulebook into this package.
+    machine = vault_schema.parent / "_meta" / "schema.json"
+    try:
+        required = set(json.loads(machine.read_text(encoding="utf-8"))["required_fields"])
+    except (OSError, json.JSONDecodeError, KeyError) as exc:
+        problems.append(f"cannot read vault machine schema {machine}: {exc}")
+    else:
+        missing = {"summary", "summary_updated"} - required
+        if missing:
+            problems.append(
+                "vault writer contract lacks required summary fields: "
+                + ", ".join(sorted(missing)))
 
     if problems:
         print(f"VAULT SCHEMA DRIFT ({vault_schema}):\n")

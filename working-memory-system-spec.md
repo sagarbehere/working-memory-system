@@ -112,10 +112,11 @@ system.
 | Undated task | Todoist **or** a `## Checklist` line in the relevant project note — one home, never both | Quick errand → Todoist only; project-scoped to-do → the project note. |
 | Artifact | stays where it already syncs; a Record carries `file_ref` | Per schema §9: a stable location, never a reorganizable path. |
 
-Vault notes carry `type`, `tags`, `status` (where applicable), `subtype`
-(references), and `created`/`updated` in frontmatter. Every vault write is
-committed **and pushed** — a local-only commit in a syncing repo is not backed
-up.
+Vault notes carry the vault-required `title`, `summary`, `summary_updated`,
+`type`, `tags`, `status` (where applicable), `subtype` (references), and
+`created`/`updated` in frontmatter. After every write, rebuild the generated
+index, maintain the authored browse route, append the agent log entry, commit,
+and push — a local-only commit in a syncing repo is not backed up.
 
 ---
 
@@ -142,7 +143,8 @@ This pass does routing (capture/question/command) and, for captures, classificat
   - `type`: `reminder | record | project | reference | idea`
   - if `record`: whether it belongs to an existing series note or is a one-off dated note (schema §3.2 — frequency determines shape)
   - if `reference`: `subtype`: `entity | concept | procedure`
-  - `domain`: 1+ flat tags, checked against the canonical list before coining a new one
+  - `tags`: 1+ flat tags, checked against the canonical list before coining a new one
+  - `summary`: a one-sentence retrieval description; `summary_updated` equal to the page's `updated` date
   - if `project` or `reference`: `status`, defaulting to `active`
   - if a `record` or `reference` involves a file: `file_ref` (schema §9)
   - `reminder` (`{due_at, message}`) when `type: reminder`

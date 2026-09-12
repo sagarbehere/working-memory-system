@@ -24,7 +24,7 @@ Every captured item is described by up to four axes:
 1. **Type** (required, exactly one) — determines storage mechanism and retrieval pattern. Five fixed values.
 2. **Domain tags** (optional, zero or more) — flat, freely assigned, drawn from a canonical list where possible.
 3. **Status** (only on Project and Reference) — active / superseded / archived.
-4. **Relations** (optional) — links to other notes, used to compose types together without blending them. Default to a generic `related:` link; promote to a sharper relation type (`supersedes`, `derived_from`, `contradicts`) only when the distinction changes what the system *does* with it (`supersedes` suppresses the old page from default answers; `contradicts` flags a review). If a sharper label wouldn't change retrieval behavior, leave it as `related:` — same discipline as domain tags: don't specialize until specialization earns its keep.
+4. **Relations** (optional) — links to other notes, used to compose types without blending them. Implementations should default to ordinary prose links and add a named field only where the system acts on it. Mycelium's `superseded_by` is one such field because it suppresses the old page from default answers.
 
 Type is the only rigid axis. Everything else is a loose filter layered on top.
 
@@ -105,7 +105,7 @@ This keeps every note a single, clean type while still giving you the combined v
 
 ## 6. Domain Tags
 
-Flat, unlimited, freely multi-assigned — not a hierarchy. Example: a curry recipe gets `domain: cooking, curry, indian` rather than being forced into one folder (Food vs. Health vs. Culture).
+Flat, unlimited, freely multi-assigned — not a hierarchy. An implementation should use its platform-native tag field (Mycelium uses `tags:`), so a curry recipe can carry cooking, curry and indian rather than being forced into one folder (Food vs. Health vs. Culture).
 
 - Maintain one **canonical tag list** in a single place, starting with ~20-40 domains.
 - New captures should be classified *against this list first*; a new tag is created only when nothing existing fits.
@@ -171,7 +171,7 @@ Ruling from the schema author on the wiki page shapes that didn't obviously fit 
 
 **Comparison pages → Reference / Concept.** Being retrieved at a decision moment doesn't distinguish a type — every Reference page is read exactly when it's needed, whether that's a procedure being followed or a person's page being checked. What matters is whether the content stays evergreen (updated in place, worth rereading later for its own sake) versus disposable scaffolding for one closing decision. **Test:** would you reread this for a reason other than nostalgia, after the decision's made? Yes → it's a genuine Concept page (a tradeoff analysis is exactly the "idea/topic explanation" Concept covers). No → it was really supporting material for a Project, and should close/archive alongside that Project rather than live on as standalone Reference.
 
-**Puzzle pages → Reference / Concept.** A challenge statement plus its solution is structurally the same shape as any other explanatory page. (A hidden-until-revealed answer would have been a genuinely new retrieval shape, not covered by any existing type or subtype — but that property isn't in play here, so it doesn't apply.) Difficulty and subject are ordinary domain tags (`domain: puzzle, math, difficulty: medium`) — the same flat-tag mechanism used everywhere else; if a puzzle collection grows large enough to need finer filtering, that's the existing nested-tag exception (`domain/puzzle/math`), not a new type.
+**Puzzle pages → Reference / Concept.** A challenge statement plus its solution is structurally the same shape as any other explanatory page. (A hidden-until-revealed answer would have been a genuinely new retrieval shape, not covered by any existing type or subtype — but that property isn't in play here, so it doesn't apply.) Difficulty and subject are optional fixed-vocabulary facets in an implementation that supports them; they are not tags. A puzzle collection that needs subject filtering can use its ordinary subject tags; it is not a new type.
 
 **Query pages** (filed answers with provenance): covered by the same test — evergreen/reusable → Reference/Concept; one-off → Project support material. (The `queries/` bucket is currently empty, so this is prospective, not a migration.)
 
